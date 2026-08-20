@@ -75,6 +75,11 @@ tracing = [
 ]
 vello = ["servo-constellation/vello"]
 
+# Experimental, non-standard: direct DOM access from WebAssembly, without JavaScript glue.
+# Deliberately absent from `default_web_features`: this is not a web standard and must be
+# opted into explicitly. Also gated at runtime by the `dom_wasm_dom_enabled` preference.
+wasm_dom = ["script/wasm_dom"]
+
 # Enable WebCrypto Web Platform Features
 webcrypto = ["servo-constellation-traits/webcrypto", "script/webcrypto"]
 webgl_backtrace = [

@@ -27,6 +27,9 @@ js_jit = ["js/jit"]
 profilemozjs = ['js/profilemozjs']
 testbinding = ["script_bindings/testbinding"]
 tracing = ["dep:tracing", "script_bindings/tracing"]
+# Experimental, non-standard: direct DOM access from WebAssembly, without JavaScript glue.
+# Also gated at runtime by the `dom_wasm_dom_enabled` preference.
+wasm_dom = ["script_bindings/wasm_dom"]
 
 # Enable webcrypto
 webcrypto = [

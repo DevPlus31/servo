@@ -72,6 +72,9 @@ bluetooth = []
 gamepad = []
 testbinding = []
 tracing = ["dep:tracing"]
+# Experimental, non-standard: direct DOM access from WebAssembly, without JavaScript glue.
+# Also gated at runtime by the `dom_wasm_dom_enabled` preference.
+wasm_dom = []
 webcrypto = []
 webgpu = []
 webgl = []

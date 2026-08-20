@@ -227,6 +227,26 @@ pub struct Preferences {
     pub dom_touch_events_legacy_apis_enabled: bool,
     /// <https://html.spec.whatwg.org/multipage/#transient-activation-duration>
     pub dom_transient_activation_duration_ms: i64,
+    /// Enable direct DOM access from WebAssembly, without JavaScript glue.
+    ///
+    /// This is an experimental, **non-standard** Servo extension, not a web platform
+    /// feature. It additionally requires the `wasm_dom` Cargo feature at build time.
+    pub dom_wasm_dom_enabled: bool,
+    /// Maximum number of live DOM handles a single WebAssembly instance may hold.
+    ///
+    /// Exceeding it fails the allocating call rather than growing without bound, so a
+    /// module that never releases handles degrades predictably instead of exhausting memory.
+    pub dom_wasm_dom_max_handles: u64,
+    /// Maximum number of WebAssembly DOM instances a single global may register.
+    ///
+    /// The registry is append-only by design -- trampolines carry indices into it -- so
+    /// entries are never reclaimed, and without a cap a page looping `createInstance()`
+    /// grows it without bound. Matches the philosophy of the handle cap: degrade
+    /// predictably with an error rather than by exhausting memory.
+    pub dom_wasm_dom_max_instances: u64,
+    /// Maximum depth of host-to-module reentrancy, for example an event listener whose
+    /// handler dispatches another event synchronously.
+    pub dom_wasm_dom_max_reentrancy: u64,
     // feature: Web Animations | #36950 | Web/API/Web_Animations_API
     pub dom_web_animations_enabled: bool,
     /// Enable WebGL2 APIs.
@@ -497,6 +517,10 @@ impl Preferences {
             dom_touch_events_legacy_apis_enabled: cfg!(target_os = "android") |
                 cfg!(target_env = "ohos"),
             dom_transient_activation_duration_ms: 5000,
+            dom_wasm_dom_enabled: false,
+            dom_wasm_dom_max_handles: 65536,
+            dom_wasm_dom_max_instances: 256,
+            dom_wasm_dom_max_reentrancy: 32,
             dom_web_animations_enabled: false,
             dom_webgl2_enabled: false,
             dom_webgpu_enabled: false,

@@ -49,6 +49,12 @@ pub mod str;
 pub mod structuredclone;
 pub mod trace;
 pub mod utils;
+/// The engine-agnostic core of the experimental WebAssembly DOM ABI. Off by default.
+#[cfg(feature = "wasm_dom")]
+pub mod wasm_abi;
+/// Slot bookkeeping for the WebAssembly DOM ABI's handle table. Off by default.
+#[cfg(feature = "wasm_dom")]
+pub mod wasm_handles;
 pub mod weakref;
 pub mod wrap;
 

@@ -122,3 +122,4 @@
 ./components/script/indexeddb.rs 2
 ./components/script/xpath.rs 1
 ./components/script_bindings/proxyhandler.rs 1
+./components/script_bindings/wasm_abi.rs 1

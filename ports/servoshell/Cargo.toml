@@ -69,6 +69,9 @@ tracing = ["dep:tracing", "dep:tracing-subscriber", "servo/tracing"]
 tracing-hitrace = ["tracing", "dep:hitrace"]
 tracing-perfetto = ["tracing", "dep:tracing-perfetto"]
 vello = ["servo/vello"]
+# Experimental, non-standard: direct DOM access from WebAssembly, without JavaScript glue.
+# Deliberately absent from `default_web_features`. See components/servo/Cargo.toml.
+wasm_dom = ["servo/wasm_dom"]
 webgl_backtrace = ["servo/webgl_backtrace"]
 webgl = ["servo/webgl"]
 webgpu = ["servo/webgpu"]
