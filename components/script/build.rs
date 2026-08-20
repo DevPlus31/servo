@@ -54,4 +54,27 @@ fn main() {
             )
             .unwrap();
         });
+
+    // copy WasmDomBindings folder, which script_bindings only emits under the `wasm_dom`
+    // feature. The shims call concrete DOM types (`Node`, `Element`) that live in this crate,
+    // so they have to be compiled here rather than where they were generated.
+    #[cfg(feature = "wasm_dom")]
+    {
+        let wasm_dom_out_dir = script_bindings_out_dir.join("WasmDomBindings");
+        println!("cargo::rerun-if-changed={}", wasm_dom_out_dir.display());
+        let _ = std::fs::create_dir(out_dir.join("WasmDomBindings"));
+        std::fs::read_dir(wasm_dom_out_dir)
+            .unwrap()
+            .filter_map(|res| res.map(|e| e.path()).ok())
+            .filter(|path| path.is_file())
+            .for_each(|file| {
+                std::fs::copy(
+                    &file,
+                    out_dir
+                        .join("WasmDomBindings")
+                        .join(file.file_name().unwrap()),
+                )
+                .unwrap();
+            });
+    }
 }

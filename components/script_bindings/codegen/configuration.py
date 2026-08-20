@@ -50,6 +50,7 @@ class Configuration:
     dictionaries: list[IDLDictionary]
     callbacks: list[IDLCallback]
     sub_crates: dict[str,list[str]]
+    wasm_exposed: dict[str, str | list[str]]
 
     def __init__(self, filename: str, parseData: list[IDLObjectWithIdentifier]) -> None:
         # Read the configuration file.
@@ -60,6 +61,8 @@ class Configuration:
         self.dictConfig = glbl['Dictionaries']
         self.unionConfig = glbl['Unions']
         self.sub_crates = glbl['SubCrates']
+        # Absent in older Bindings.conf revisions; treat that as "expose nothing".
+        self.wasm_exposed = glbl.get('WasmExposed', {})
 
         # Build descriptors for all the interfaces we have in the parse data.
         # This allows callers to specify a subset of interfaces by filtering
@@ -191,6 +194,18 @@ class Configuration:
             raise NoSuchDescriptorError("For " + interfaceName + " found "
                                         + str(len(descriptors)) + " matches")
         return descriptors[0]
+
+    def getWasmDescriptors(self) -> list[tuple[Descriptor, str | list[str]]]:
+        """Descriptors named by `WasmExposed`, paired with their member selection.
+
+        Sorted by interface name so the generated registry is deterministic — the emitted
+        import table is compared byte-for-byte by the gating check, and an
+        iteration-order-dependent table would make that check useless.
+        """
+        selected = []
+        for name in sorted(self.wasm_exposed):
+            selected.append((self.getDescriptor(name), self.wasm_exposed[name]))
+        return selected
 
     def getDescriptorProvider(self) -> DescriptorProvider:
         """

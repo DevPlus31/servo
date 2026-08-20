@@ -109,6 +109,14 @@ def main() -> None:
             with open(os.path.join(out_dir, prefix + ".rs"), "wb") as f:
                 f.write(module.encode("utf-8"))
 
+    # Wasm→DOM shims, only when the feature is on. Cargo exposes enabled features to build
+    # scripts as CARGO_FEATURE_*, the same mechanism `filter_conditional_blocks` uses above.
+    # Skipping the call entirely — rather than generating an empty directory — is what makes
+    # "feature off ⇒ byte-identical generated output" true by construction.
+    if os.environ.get("CARGO_FEATURE_WASM_DOM"):
+        from wasm_codegen import generate_wasm_artifacts
+        generate_wasm_artifacts(config, out_dir)
+
 
 def make_dir(path: str)-> str:
     if not os.path.exists(path):

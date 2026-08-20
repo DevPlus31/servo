@@ -26,6 +26,9 @@ fn main() {
     println!("cargo::rerun-if-changed={}", css_properties_json.display());
     println!("cargo::rerun-if-changed=third_party/WebIDL/parser/WebIDL.py");
     println!("cargo::rerun-if-changed=third_party/ply");
+    // codegen/run.py branches on this to decide whether to emit the Wasm→DOM shims, so
+    // toggling the feature has to invalidate the generated output.
+    println!("cargo::rerun-if-env-changed=CARGO_FEATURE_WASM_DOM");
 
     let status = find_python()
         .arg("codegen/run.py")
