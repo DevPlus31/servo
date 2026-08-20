@@ -1,7 +1,8 @@
 # Direct DOM access from WebAssembly
 
-> **This is an experiment. It is not a web standard, it is not on by default, and it is not
-> production code.**
+> **This is an experiment. It is not a web standard and it is not production code.** It is
+> enabled by default on this fork because the whole fork is a proof of concept; the gating
+> described below still exists and can be switched back off.
 >
 > No browser ships direct DOM access from WebAssembly, and this is not an attempt to change
 > that. The WebIDL Bindings proposal was folded into the Component Model, which is still
@@ -122,12 +123,16 @@ preference, and is trivially removable.
 
 ## Running it
 
-Both gates are off by default and both are required:
+Two gates exist -- the `wasm_dom` Cargo feature and the `dom_wasm_dom_enabled` preference --
+and on this fork both default on, so a plain build is enough:
 
 ```bash
-./mach build --dev --features wasm_dom
-./mach run --pref dom_wasm_dom_enabled=true /path/to/page.html
+./mach build --dev
+./mach run /path/to/page.html
 ```
+
+For an unmodified-Servo configuration, drop `wasm_dom` from `default_web_features` and set
+the preference to false; a page then renders byte-for-byte as stock Servo would.
 
 Working demos live in [`tests/html/`](../tests/html):
 
@@ -136,6 +141,7 @@ Working demos live in [`tests/html/`](../tests/html):
 | `wasm-dom-hello.html` | The example above: 147 bytes, zero JavaScript |
 | `wasm-dom-nojs.html` | 630 bytes, zero JavaScript, renders text created by the module |
 | `wasm-dom-events.html` | A `[−] counter [+]` widget: both buttons, the counter, and both click handlers live in a 922-byte hand-written module |
+| `wasm-dom-orders.html` | An orders table with computed totals and click-to-select rows, from a **2.4 KB module compiled from Rust** — see below |
 | `wasm-dom-demo.html` | JavaScript-driven harness that asserts ABI behaviour directly |
 
 `wasm-dom-events-harness.html` drives the same module from JavaScript and asserts what it
@@ -154,12 +160,49 @@ behaviour no specification defines, so upstreaming them would be wrong. They reu
 *runner* because it is the only harness in the tree that can run a real page in a real
 browser.
 
-**They are disabled by default.** Each test guards on `assert_implements_optional`, but that
-is not enough on its own: without the Cargo feature the subtests report `PRECONDITION_FAILED`
-against an expected `PASS`, which wptrunner counts as an *unexpected* result — 70 of them,
-failing the whole run. So `__dir__.ini` carries a `disabled:` line and a normal
-`./mach test-wpt` skips the directory cleanly. To run them, build with `--features wasm_dom`
-and delete that line.
+**They run by default on this fork**, since the feature ships in `default_web_features`. On
+a build *without* the Cargo feature they must be disabled in `__dir__.ini` instead: each test
+guards on `assert_implements_optional`, but that sets the subtest *status* to
+`PRECONDITION_FAILED` while the *expectation* stays `PASS`, and wptrunner counts the mismatch
+as an unexpected result — 70 of them, failing the whole run.
+
+## The same ABI from Rust
+
+Hand-written `.wat` proves the ABI is simple; the orders demo proves a **toolchain** can use
+it, which is the claim the whole design was shaped around. `i32` handles were chosen over
+`externref` precisely so that plain `wasm32-unknown-unknown` Rust — no wasm-bindgen, no glue
+generator — could bind the imports directly:
+
+```rust
+#[link(wasm_import_module = "servo:dom/document")]
+extern "C" {
+    #[link_name = "create-element"]
+    fn create_element(doc: i32, ptr: i32, len: i32) -> i32;
+}
+
+#[no_mangle]
+pub extern "C" fn _servo_dom_start() { /* … */ }
+```
+
+`wasm_import_module` carries the colon-and-slash module name, `link_name` the kebab-case
+field, and a `&str`'s `(as_ptr(), len())` is already the ABI's string encoding — Rust strings
+are UTF-8 in linear memory, which is exactly what the host validates.
+
+The crate behind the demo is
+[`tests/html/wasm-dom-orders/`](../tests/html/wasm-dom-orders): `#![no_std]`, **no
+allocator**, `panic = "abort"`, compiling to 2,464 bytes. It builds the table, formats the
+money column (thousands separators and all) with integer math into stack buffers, computes
+the totals row, and toggles row selection from its dispatcher on click. Build it with:
+
+```bash
+cargo build --release --target wasm32-unknown-unknown --target-dir target
+```
+
+The `.wasm` is checked in beside the page, like the `.wat` demos, so the demo works without
+the wasm target installed.
+
+![An orders table rendered in Servo: five users with order counts and amounts, a computed
+totals row reading 63 orders and $6,025.49](images/wasm-dom-orders.png)
 
 ## How the ABI works
 

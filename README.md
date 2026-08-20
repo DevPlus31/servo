@@ -1,7 +1,9 @@
 # Servo fork — direct DOM access from WebAssembly
 
 > **This fork is an experiment, on the [`wasm-dom`](../../tree/wasm-dom) branch.**
-> It is not a web standard, it is not enabled by default, and it is not production code.
+> It is not a web standard and it is not production code. Because the whole fork is a
+> proof of concept, the feature is built and enabled by default here; upstream-style
+> gating (a Cargo feature plus a preference) still exists and can be switched back off.
 > Servo's own README follows [below](#the-servo-parallel-browser-engine-project).
 
 Every WebAssembly application on the web today reaches the DOM through author-written
@@ -83,11 +85,11 @@ orthogonal, currently-inert `type` value and does not touch that work.
 
 ## Trying it
 
-Both gates are off by default and both are required:
+On this fork both gates default on, so a plain build is enough:
 
 ```bash
-./mach build --dev --features wasm_dom
-./mach run --pref dom_wasm_dom_enabled=true tests/html/wasm-dom-events.html
+./mach build --dev
+./mach run tests/html/wasm-dom-events.html
 ```
 
 ## What is in it
@@ -99,6 +101,9 @@ Both gates are off by default and both are required:
 - **`<script type="application/wasm">`** as a JavaScript-free entry point
 - **A handle table with generation counters** and permanent slot retirement, so a released
   handle can never resolve to whatever lands in its slot next
+- **A demo compiled from plain Rust** — a 2.4 KB `no_std` module, no wasm-bindgen, no
+  allocator, binding the imports with nothing but `#[link(wasm_import_module = "servo:dom/…")]`.
+  It renders an orders table with computed totals and click-to-select rows.
 
 ![Test harness output listing twelve passing checks, ending in ALL CHECKS
 PASSED](docs/images/wasm-dom-harness.png)
