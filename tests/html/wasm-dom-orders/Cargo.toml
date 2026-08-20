@@ -19,6 +19,7 @@
 name = "wasm_dom_orders"
 version = "0.1.0"
 edition = "2021"
+license = "MPL-2.0"
 publish = false
 
 # Deliberately not a member of Servo's workspace: this compiles for a different target with
