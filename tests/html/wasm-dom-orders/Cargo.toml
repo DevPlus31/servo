@@ -1,0 +1,36 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# A wasm-dom demo module written in Rust, compiled to wasm32-unknown-unknown.
+#
+# Until this crate, every demo module was hand-written .wat. This one exists to prove the
+# toolchain claim the ABI was designed around: that a plain Rust crate -- no wasm-bindgen,
+# no JavaScript shim, no allocator -- can bind the `servo:dom/*` imports directly through
+# `#[link(wasm_import_module = ...)]`. The i32 handle design (rather than externref) is what
+# makes that possible at all.
+#
+# Build (from this directory; the .wasm is checked in beside the page like the .wat demos):
+#
+#   cargo build --release --target wasm32-unknown-unknown --target-dir target
+#   cp target/wasm32-unknown-unknown/release/wasm_dom_orders.wasm ../wasm-dom-orders.wasm
+
+[package]
+name = "wasm_dom_orders"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Deliberately not a member of Servo's workspace: this compiles for a different target with
+# a different profile, and shares no dependencies.
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = "z"
+lto = true
+panic = "abort"
+strip = true
+codegen-units = 1

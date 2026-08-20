@@ -1,0 +1,40 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Servo: an orders table from Rust-compiled WebAssembly</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font: 15px/1.6 system-ui, sans-serif;
+    margin: 2.5rem auto; max-width: 44rem; padding: 0 1rem;
+    background: #15171c; color: #c9cdd4;
+  }
+  h1 { font-size: 1.2rem; color: #f2f4f7; }
+  #panel {
+    background: #1c1f26; border: 1px solid #2a2e37; border-radius: 12px;
+    padding: 1.25rem 1.5rem; margin-top: 1.25rem;
+  }
+  table.orders { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  .orders th, .orders td { padding: .55rem .6rem; text-align: left; }
+  .orders th { color: #8b93a1; font-weight: 600; font-size: .8rem;
+               text-transform: uppercase; letter-spacing: .06em;
+               border-bottom: 1px solid #2a2e37; }
+  .orders th.num, .orders td.num { text-align: right; }
+  .orders tbody tr { cursor: pointer; border-bottom: 1px solid #23262e; }
+  .orders tbody tr:hover { background: #232732; }
+  .orders tbody tr.selected { background: #2b3350; box-shadow: inset 3px 0 0 #6f8bfa; }
+  .orders tfoot td { border-top: 2px solid #2a2e37; font-weight: 700; color: #f2f4f7; }
+  .note { color: #8b93a1; font-size: .85rem; margin-top: 1rem; text-align: center; }
+  code { font-family: ui-monospace, monospace; }
+</style>
+
+<h1>An orders table from Rust</h1>
+<p>This page contains no JavaScript. The table below — rows, totals, and the click-to-select
+behaviour — comes from a <strong>2.4&nbsp;KB WebAssembly module compiled from plain Rust</strong>:
+<code>no_std</code>, no allocator, no wasm-bindgen. Click a row to select it; the module
+toggles the class from inside wasm.</p>
+
+<div id="panel"></div>
+
+<p class="note">Everything inside the panel came from <code>wasm-dom-orders/src/lib.rs</code>.</p>
+
+<script type="application/wasm" src="wasm-dom-orders.wasm" defer></script>
