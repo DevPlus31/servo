@@ -7,7 +7,8 @@
 //! This is an experimental, **non-standard** Servo extension. There is no web standard for
 //! calling DOM operations from Wasm: the WebIDL Bindings proposal was folded into the
 //! Component Model, which is still phase 1. It is gated behind the `wasm_dom` Cargo feature
-//! and the `dom_wasm_dom_enabled` preference, both off by default, and is shaped so it can
+//! and the `dom_wasm_dom_enabled` preference (both default on in this proof-of-concept
+//! fork; upstream-style gating remains one flag away), and is shaped so it can
 //! migrate toward WIT and the canonical ABI rather than becoming a dead end.
 //!
 //! # Why this is tractable in Servo

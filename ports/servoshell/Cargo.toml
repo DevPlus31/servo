@@ -48,7 +48,7 @@ default = ["default_without_allocator", "servo-allocator/use-jemalloc"]
 default_without_allocator = ["bundled", "default_web_features", "max_log_level", "js_jit"]
 # Default web features should be kept in sync with the list in servo/Cargo.toml.
 # We also need to enable our own features, since we also have `cfg` gated code here.
-default_web_features = ["servo/default_web_features", "gamepad", "webgpu", "webxr"]
+default_web_features = ["servo/default_web_features", "gamepad", "wasm_dom", "webgpu", "webxr"]
 # Bundle required resources in the binary.
 bundled = ["servo/bundled"]
 
@@ -70,7 +70,7 @@ tracing-hitrace = ["tracing", "dep:hitrace"]
 tracing-perfetto = ["tracing", "dep:tracing-perfetto"]
 vello = ["servo/vello"]
 # Experimental, non-standard: direct DOM access from WebAssembly, without JavaScript glue.
-# Deliberately absent from `default_web_features`. See components/servo/Cargo.toml.
+# In `default_web_features`: this fork is a proof of concept. See components/servo/Cargo.toml.
 wasm_dom = ["servo/wasm_dom"]
 webgl_backtrace = ["servo/webgl_backtrace"]
 webgl = ["servo/webgl"]

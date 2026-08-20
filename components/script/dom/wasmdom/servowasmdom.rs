@@ -14,7 +14,7 @@
 //! whole ABI can be exercised from plain `testharness.js`.
 //!
 //! It is gated twice over: the `wasm_dom` Cargo feature at build time and the
-//! `dom_wasm_dom_enabled` preference at runtime, both off by default.
+//! `dom_wasm_dom_enabled` preference at runtime -- both default on in this fork.
 
 use std::rc::Rc;
 

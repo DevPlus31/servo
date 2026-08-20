@@ -229,8 +229,10 @@ pub struct Preferences {
     pub dom_transient_activation_duration_ms: i64,
     /// Enable direct DOM access from WebAssembly, without JavaScript glue.
     ///
-    /// This is an experimental, **non-standard** Servo extension, not a web platform
-    /// feature. It additionally requires the `wasm_dom` Cargo feature at build time.
+    /// This is an experimental, **non-standard** extension, not a web platform feature. It
+    /// additionally requires the `wasm_dom` Cargo feature at build time. Both default on in
+    /// this fork, which is a proof of concept end to end; set this to false for an
+    /// unmodified-Servo configuration.
     pub dom_wasm_dom_enabled: bool,
     /// Maximum number of live DOM handles a single WebAssembly instance may hold.
     ///
@@ -517,7 +519,7 @@ impl Preferences {
             dom_touch_events_legacy_apis_enabled: cfg!(target_os = "android") |
                 cfg!(target_env = "ohos"),
             dom_transient_activation_duration_ms: 5000,
-            dom_wasm_dom_enabled: false,
+            dom_wasm_dom_enabled: true,
             dom_wasm_dom_max_handles: 65536,
             dom_wasm_dom_max_instances: 256,
             dom_wasm_dom_max_reentrancy: 32,

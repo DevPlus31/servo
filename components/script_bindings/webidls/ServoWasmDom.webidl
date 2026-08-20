@@ -8,8 +8,8 @@
 // web pages.
 //
 // It is doubly gated -- the `wasm_dom` Cargo feature at build time and the
-// `dom_wasm_dom_enabled` preference at runtime, both off by default -- so a default build
-// does not expose it at all. There is no specification to link: see below.
+// `dom_wasm_dom_enabled` preference at runtime; both default on in this proof-of-concept
+// fork, and turning either off removes it. There is no specification to link: see below.
 
 // Experimental, non-standard. There is no web standard for calling DOM operations from
 // WebAssembly: the WebIDL Bindings proposal was folded into the Component Model, which is

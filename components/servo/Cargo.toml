@@ -23,7 +23,7 @@ default = ["bundled", "clipboard", "js_jit"]
 #  configuration with `--no-default-features` build
 #
 # A convenience feature to enable all default web features servo has.
-default_web_features = ["brotli-compression-stream", "clipboard", "webcrypto", "webgpu", "webxr"]
+default_web_features = ["brotli-compression-stream", "clipboard", "wasm_dom", "webcrypto", "webgpu", "webxr"]
 # Bundle required resources in the binary.
 bundled = ["baked-in-resources", "bundled_freetype"]
 
@@ -76,8 +76,9 @@ tracing = [
 vello = ["servo-constellation/vello"]
 
 # Experimental, non-standard: direct DOM access from WebAssembly, without JavaScript glue.
-# Deliberately absent from `default_web_features`: this is not a web standard and must be
-# opted into explicitly. Also gated at runtime by the `dom_wasm_dom_enabled` preference.
+# Experimental and non-standard; in `default_web_features` because this whole fork is a
+# proof of concept. The `dom_wasm_dom_enabled` preference also defaults on here -- flip it
+# off (or drop this from the defaults) to get an unmodified-Servo configuration.
 wasm_dom = ["script/wasm_dom"]
 
 # Enable WebCrypto Web Platform Features
