@@ -1,0 +1,127 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Servo: DOM from WebAssembly</title>
+<style>
+  body { font: 15px/1.5 system-ui, sans-serif; margin: 2rem; max-width: 46rem; }
+  h1 { font-size: 1.2rem; }
+  #log { border: 1px solid #ccc; padding: .75rem; white-space: pre-wrap;
+         font: 13px/1.45 ui-monospace, monospace; background: #fafafa; }
+  .ok { color: #0a0; } .fail { color: #c00; font-weight: 600; }
+</style>
+
+<h1>DOM from WebAssembly, without JavaScript glue</h1>
+
+<p>The <code>&lt;div&gt;</code> below is created and filled by a hand-written WebAssembly
+module calling the DOM directly. The JavaScript on this page only loads it — it never
+touches the element.</p>
+
+<div id="log">running…</div>
+<p><em>The module appends to <code>document.body</code>, so its output lands
+below this line:</em></p>
+
+<script>
+// Hand-written .wat, assembled with wat2wasm. Embedded rather than fetched so the page works
+// straight off the filesystem with no network or fetch permissions involved.
+const WASM = new Uint8Array([
+      0, 97, 115, 109, 1, 0, 0, 0, 1, 30, 6, 96, 0, 1, 127, 96, 1, 127, 0, 96,
+      1, 127, 1, 127, 96, 3, 127, 127, 127, 1, 127, 96, 2, 127, 127, 1, 127, 96, 0, 0,
+      2, 253, 1, 8, 14, 115, 101, 114, 118, 111, 58, 100, 111, 109, 47, 99, 111, 114, 101, 8,
+      100, 111, 99, 117, 109, 101, 110, 116, 0, 0, 14, 115, 101, 114, 118, 111, 58, 100, 111, 109,
+      47, 99, 111, 114, 101, 11, 104, 97, 110, 100, 108, 101, 45, 100, 114, 111, 112, 0, 1, 14,
+      115, 101, 114, 118, 111, 58, 100, 111, 109, 47, 99, 111, 114, 101, 11, 97, 98, 105, 45, 118,
+      101, 114, 115, 105, 111, 110, 0, 0, 18, 115, 101, 114, 118, 111, 58, 100, 111, 109, 47, 100,
+      111, 99, 117, 109, 101, 110, 116, 8, 103, 101, 116, 45, 98, 111, 100, 121, 0, 2, 18, 115,
+      101, 114, 118, 111, 58, 100, 111, 109, 47, 100, 111, 99, 117, 109, 101, 110, 116, 14, 99, 114,
+      101, 97, 116, 101, 45, 101, 108, 101, 109, 101, 110, 116, 0, 3, 18, 115, 101, 114, 118, 111,
+      58, 100, 111, 109, 47, 100, 111, 99, 117, 109, 101, 110, 116, 16, 99, 114, 101, 97, 116, 101,
+      45, 116, 101, 120, 116, 45, 110, 111, 100, 101, 0, 3, 14, 115, 101, 114, 118, 111, 58, 100,
+      111, 109, 47, 110, 111, 100, 101, 12, 97, 112, 112, 101, 110, 100, 45, 99, 104, 105, 108, 100,
+      0, 4, 14, 115, 101, 114, 118, 111, 58, 100, 111, 109, 47, 110, 111, 100, 101, 16, 103, 101,
+      116, 45, 116, 101, 120, 116, 45, 99, 111, 110, 116, 101, 110, 116, 0, 3, 3, 3, 2, 2,
+      5, 5, 3, 1, 0, 1, 6, 33, 6, 127, 0, 65, 0, 11, 127, 0, 65, 3, 11, 127,
+      0, 65, 16, 11, 127, 0, 65, 15, 11, 127, 0, 65, 128, 2, 11, 127, 0, 65, 128, 2,
+      11, 7, 29, 2, 6, 109, 101, 109, 111, 114, 121, 2, 0, 16, 95, 115, 101, 114, 118, 111,
+      95, 100, 111, 109, 95, 115, 116, 97, 114, 116, 0, 9, 10, 180, 1, 2, 7, 0, 32, 0,
+      65, 127, 72, 11, 169, 1, 1, 5, 127, 16, 2, 65, 0, 71, 4, 64, 15, 11, 16, 0,
+      33, 0, 32, 0, 16, 8, 4, 64, 15, 11, 32, 0, 16, 3, 33, 1, 32, 1, 65, 1,
+      72, 4, 64, 32, 0, 16, 1, 15, 11, 32, 0, 35, 0, 35, 1, 16, 4, 33, 2, 32,
+      2, 16, 8, 4, 64, 32, 1, 16, 1, 32, 0, 16, 1, 15, 11, 32, 0, 35, 2, 35,
+      3, 16, 5, 33, 3, 32, 3, 16, 8, 4, 64, 32, 2, 16, 1, 32, 1, 16, 1, 32,
+      0, 16, 1, 15, 11, 32, 2, 32, 3, 16, 6, 33, 4, 32, 4, 65, 0, 74, 4, 64,
+      32, 4, 16, 1, 11, 32, 1, 32, 2, 16, 6, 33, 4, 32, 4, 65, 0, 74, 4, 64,
+      32, 4, 16, 1, 11, 32, 2, 35, 4, 35, 5, 16, 7, 33, 4, 32, 4, 26, 32, 3,
+      16, 1, 32, 2, 16, 1, 32, 1, 16, 1, 32, 0, 16, 1, 11, 11, 29, 2, 0, 65,
+      0, 11, 3, 100, 105, 118, 0, 65, 16, 11, 15, 104, 101, 108, 108, 111, 32, 102, 114, 111,
+      109, 32, 119, 97, 115, 109
+]);
+
+const logEl = document.getElementById("log");
+let failures = 0;
+function say(msg, cls) {
+  console.log(msg);                       // -> stdout of the launching terminal
+  const line = document.createElement("div");
+  if (cls) line.className = cls;
+  line.textContent = msg;
+  logEl.appendChild(line);
+}
+function check(cond, what) {
+  if (cond) { say("PASS  " + what, "ok"); }
+  else { failures++; say("FAIL  " + what, "fail"); }
+}
+
+(async () => {
+  logEl.textContent = "";
+
+  if (typeof ServoWasmDom === "undefined") {
+    say("FAIL  ServoWasmDom is undefined.", "fail");
+    say("      Needs a build with --features wasm_dom AND");
+    say("      --pref dom_wasm_dom_enabled=true", "");
+    return;
+  }
+  say("PASS  ServoWasmDom namespace present", "ok");
+
+  const id = ServoWasmDom.createInstance();
+  check(typeof id === "number" && id >= 0, "createInstance() -> " + id);
+
+  const imports = ServoWasmDom.importObject(id);
+  check(typeof imports === "object" && imports !== null, "importObject() returned an object");
+  check("servo:dom/core" in imports, "import namespace servo:dom/core exists");
+  check("servo:dom/node" in imports, "import namespace servo:dom/node exists");
+  check(typeof imports["servo:dom/core"]["document"] === "function",
+        "servo:dom/core.document is a function");
+
+  let instance;
+  try {
+    ({ instance } = await WebAssembly.instantiate(WASM, imports));
+  } catch (e) {
+    say("FAIL  instantiate threw: " + e, "fail");
+    return;
+  }
+  check(!!instance, "module instantiated against the host imports");
+
+  ServoWasmDom.bindMemory(id, instance.exports.memory);
+  say("PASS  memory bound", "ok");
+
+  const before = ServoWasmDom.handleCount(id);
+  check(before === 0, "handle count starts at 0 (was " + before + ")");
+
+  // Everything past this point is the module driving the DOM on its own.
+  instance.exports._servo_dom_start();
+  say("PASS  _servo_dom_start() returned", "ok");
+
+  const created = document.getElementsByTagName("div");
+  let found = null;
+  for (const d of created) if (d.textContent === "hello from wasm") found = d;
+  check(!!found, "module created a <div> containing its text");
+
+  const after = ServoWasmDom.handleCount(id);
+  check(after === 0, "module released every handle (leaked " + after + ")");
+
+  ServoWasmDom.tearDown(id);
+  say("PASS  torn down", "ok");
+
+  say("");
+  say(failures === 0 ? "ALL CHECKS PASSED" : failures + " CHECK(S) FAILED",
+      failures === 0 ? "ok" : "fail");
+})().catch(e => say("FAIL  uncaught: " + e, "fail"));
+</script>

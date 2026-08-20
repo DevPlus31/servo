@@ -1,0 +1,15 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Servo: DOM from WebAssembly, zero JavaScript</title>
+<style>
+  body { font: 15px/1.6 system-ui, sans-serif; margin: 2rem; max-width: 42rem; }
+  h1 { font-size: 1.15rem; }
+  code { background: #f3f3f3; padding: 0 .25rem; }
+</style>
+
+<h1>Zero JavaScript</h1>
+<p>This document contains no JavaScript at all — the only script element is a
+<code>&lt;script type="application/wasm"&gt;</code>. If the line below this paragraph reads
+<strong>hello from wasm</strong>, a WebAssembly module reached the DOM on its own.</p>
+
+<script type="application/wasm" src="wasm-dom-demo.wasm"></script>

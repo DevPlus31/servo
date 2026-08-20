@@ -1,0 +1,57 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>wasm-dom: the application/wasm script element</title>
+<link rel="help" href="https://github.com/servo/servo">
+<script src="/resources/testharness.js"></script>
+<script src="/resources/testharnessreport.js"></script>
+<body>
+<div id="fixture"></div>
+<!-- The control: a real module, correct MIME, loaded by the parser exactly the way a page
+     would. marker.wasm appends <div>ok</div> into #fixture on start. -->
+<script type="application/wasm" src="resources/marker.wasm" defer></script>
+<script>
+function feature() {
+  assert_implements_optional(
+    typeof ServoWasmDom !== "undefined",
+    "the wasm_dom Cargo feature is required",
+  );
+}
+
+// The JavaScript here is the test driver; the module under test contains none.
+
+async_test(t => {
+  feature();
+  addEventListener("load", t.step_func_done(() => {
+    const div = document.querySelector("#fixture div");
+    assert_true(!!div, "the parser-inserted wasm script ran");
+    assert_equals(div.textContent, "ok", "…and reached the live DOM");
+  }));
+}, "a parser-inserted application/wasm script executes");
+
+async_test(t => {
+  feature();
+  // A missing resource must surface as an error event on the element, exactly as a classic
+  // script's fetch failure does -- the wasm path reuses that machinery rather than adding
+  // its own.
+  const script = document.createElement("script");
+  script.type = "application/wasm";
+  script.src = "resources/no-such-module.wasm";
+  script.onerror = t.step_func_done(() => {});
+  script.onload = t.unreached_func("a 404 must not fire load");
+  document.body.appendChild(script);
+}, "a 404 fires the element's error event");
+
+async_test(t => {
+  feature();
+  // Same bytes, wrong Content-Type. Classic scripts tolerate sloppy MIME types; this path
+  // deliberately does not -- `application/wasm` is required exactly, because a new
+  // privileged surface should not inherit two decades of MIME leniency.
+  const script = document.createElement("script");
+  script.type = "application/wasm";
+  script.src = "resources/marker.wasm?pipe=header(Content-Type,text/plain)";
+  script.onerror = t.step_func_done(() => {});
+  script.onload = t.unreached_func("a wrong MIME type must not fire load");
+  document.body.appendChild(script);
+}, "a wrong Content-Type is rejected with an error event");
+</script>
+</body>

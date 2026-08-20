@@ -1,0 +1,101 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Servo: interactive DOM from WebAssembly</title>
+<style>
+  /* Explicit colours for both schemes. Servo's chrome follows the system theme, and a page
+     that sets neither background nor colour inherits an unreadable mix of the two. */
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff;
+    --fg: #16181d;
+    --muted: #5b6270;
+    --rule: #d8dce4;
+    --accent: #2f6feb;
+    --accent-fg: #ffffff;
+    --card: #f6f7f9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16181d;
+      --fg: #e8eaed;
+      --muted: #9aa2b1;
+      --rule: #2c313a;
+      --accent: #4d86f7;
+      --accent-fg: #0b0d10;
+      --card: #1e222a;
+    }
+  }
+
+  html { background: var(--bg); }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+    margin: 0;
+    padding: 3rem 1.5rem;
+  }
+  main { max-width: 34rem; margin: 0 auto; }
+
+  h1 { font-size: 1.35rem; letter-spacing: -0.01em; margin: 0 0 .4rem; }
+  .sub { color: var(--muted); margin: 0 0 2rem; }
+
+  .panel {
+    border: 1px solid var(--rule);
+    background: var(--card);
+    border-radius: 10px;
+    padding: 1.75rem;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    gap: 1.5rem;
+    min-height: 4.5rem;
+  }
+
+  /* The module creates a bare <button> and a bare <div>; both are styled by descendant
+     selectors so the wasm side needs no class-name plumbing. */
+  /* The module creates two bare <button>s and one bare <div>; DOM order is [-] count [+],
+     so the page can lay them out without the module knowing anything about presentation. */
+  .panel button {
+    font: 400 1.5rem/1 system-ui, sans-serif;
+    color: var(--accent-fg);
+    background: var(--accent);
+    border: 0;
+    border-radius: 50%;
+    width: 2.75rem;
+    height: 2.75rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+  }
+  .panel button:hover { filter: brightness(1.08); }
+  .panel button:active { transform: translateY(1px); }
+
+  .panel div {
+    font: 600 1.75rem/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-variant-numeric: tabular-nums;
+    color: var(--fg);
+    min-width: 9ch;
+    text-align: center;
+  }
+
+  footer { color: var(--muted); font-size: .875rem; margin-top: 2rem; text-align: center; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+</style>
+
+<main>
+  <h1>Interactive DOM from WebAssembly</h1>
+  <p class="sub">This page contains no JavaScript. Both buttons, the counter, and the click
+  handlers that drive it are created by a hand-written WebAssembly module. The two buttons
+  share one exported dispatcher and are told apart by callback id.</p>
+
+  <!-- The module looks this up by id and appends its button and counter into it. -->
+  <div class="panel" id="panel"></div>
+
+  <footer>Everything inside the panel came from <code>wasm-dom-events.wasm</code>.</footer>
+</main>
+
+<!-- Placed after the container so it is in the tree by the time the module runs. -->
+<script type="application/wasm" src="wasm-dom-events.wasm"></script>

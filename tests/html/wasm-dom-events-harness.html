@@ -1,0 +1,159 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Servo: wasm event listeners</title>
+<style>
+  body { font: 15px/1.5 system-ui, sans-serif; margin: 2rem; max-width: 46rem; }
+  #log { border: 1px solid #ccc; padding: .75rem; white-space: pre-wrap;
+         font: 13px/1.45 ui-monospace, monospace; background: #fafafa; }
+  .ok { color: #0a0; } .fail { color: #c00; font-weight: 600; }
+</style>
+
+<h1>Wasm event listeners</h1>
+<p>Harness for phase 3. The JavaScript here is the <em>test driver</em> — it loads the module
+and synthesises clicks. The button, the counter, and the click handler all live in wasm.</p>
+
+<div id="log">running…</div>
+
+<script>
+// Inlined rather than fetched: fetch() does not work from a file:// page, so the module
+// bytes live here. Regenerate with scratchpad/sync-harness.py after ANY change to
+// wasm-dom-events.wat -- these bytes silently going stale once cost 8 failing checks
+// against a host that was behaving correctly.
+// 934 bytes, from wasm-dom-events.wasm.
+const WASM = new Uint8Array([
+  0, 97, 115, 109, 1, 0, 0, 0, 1, 47, 8, 96, 0, 1, 127, 96, 1, 127, 0, 96, 1, 127, 1, 127, 96,
+  3, 127, 127, 127, 1, 127, 96, 2, 127, 127, 1, 127, 96, 4, 127, 127, 127, 127, 1, 127, 96, 5,
+  127, 127, 127, 127, 127, 1, 127, 96, 0, 0, 2, 141, 2, 8, 14, 115, 101, 114, 118, 111, 58,
+  100, 111, 109, 47, 99, 111, 114, 101, 8, 100, 111, 99, 117, 109, 101, 110, 116, 0, 0, 14,
+  115, 101, 114, 118, 111, 58, 100, 111, 109, 47, 99, 111, 114, 101, 11, 104, 97, 110, 100,
+  108, 101, 45, 100, 114, 111, 112, 0, 1, 18, 115, 101, 114, 118, 111, 58, 100, 111, 109, 47,
+  100, 111, 99, 117, 109, 101, 110, 116, 8, 103, 101, 116, 45, 98, 111, 100, 121, 0, 2, 18,
+  115, 101, 114, 118, 111, 58, 100, 111, 109, 47, 100, 111, 99, 117, 109, 101, 110, 116, 17,
+  103, 101, 116, 45, 101, 108, 101, 109, 101, 110, 116, 45, 98, 121, 45, 105, 100, 0, 3, 18,
+  115, 101, 114, 118, 111, 58, 100, 111, 109, 47, 100, 111, 99, 117, 109, 101, 110, 116, 14,
+  99, 114, 101, 97, 116, 101, 45, 101, 108, 101, 109, 101, 110, 116, 0, 3, 14, 115, 101, 114,
+  118, 111, 58, 100, 111, 109, 47, 110, 111, 100, 101, 12, 97, 112, 112, 101, 110, 100, 45,
+  99, 104, 105, 108, 100, 0, 4, 14, 115, 101, 114, 118, 111, 58, 100, 111, 109, 47, 110, 111,
+  100, 101, 16, 115, 101, 116, 45, 116, 101, 120, 116, 45, 99, 111, 110, 116, 101, 110, 116,
+  0, 5, 22, 115, 101, 114, 118, 111, 58, 100, 111, 109, 47, 101, 118, 101, 110, 116, 45, 116,
+  97, 114, 103, 101, 116, 18, 97, 100, 100, 45, 101, 118, 101, 110, 116, 45, 108, 105, 115,
+  116, 101, 110, 101, 114, 0, 6, 3, 7, 6, 2, 0, 7, 6, 4, 7, 5, 3, 1, 0, 1, 6, 21, 4, 127, 0,
+  65, 7, 11, 127, 0, 65, 8, 11, 127, 1, 65, 0, 11, 127, 1, 65, 0, 11, 7, 51, 3, 6, 109, 101,
+  109, 111, 114, 121, 2, 0, 19, 95, 115, 101, 114, 118, 111, 95, 100, 111, 109, 95, 100, 105,
+  115, 112, 97, 116, 99, 104, 0, 12, 16, 95, 115, 101, 114, 118, 111, 95, 100, 111, 109, 95,
+  115, 116, 97, 114, 116, 0, 13, 10, 187, 3, 6, 7, 0, 32, 0, 65, 1, 72, 11, 148, 1, 1, 4, 127,
+  35, 3, 33, 0, 65, 200, 0, 33, 3, 32, 0, 65, 0, 72, 4, 64, 32, 3, 65, 45, 58, 0, 0, 32, 3,
+  65, 1, 106, 33, 3, 65, 0, 32, 0, 107, 33, 0, 11, 65, 0, 33, 1, 2, 64, 3, 64, 65, 224, 0, 32,
+  1, 106, 65, 48, 32, 0, 65, 10, 112, 106, 58, 0, 0, 32, 1, 65, 1, 106, 33, 1, 32, 0, 65, 10,
+  110, 33, 0, 32, 0, 69, 13, 1, 12, 0, 11, 11, 65, 0, 33, 2, 2, 64, 3, 64, 32, 2, 32, 1, 79,
+  13, 1, 32, 3, 32, 2, 106, 65, 224, 0, 32, 1, 65, 1, 107, 32, 2, 107, 106, 45, 0, 0, 58, 0,
+  0, 32, 2, 65, 1, 106, 33, 2, 12, 0, 11, 11, 32, 3, 65, 192, 0, 107, 32, 1, 106, 11, 20, 1,
+  1, 127, 16, 9, 33, 0, 35, 2, 65, 192, 0, 32, 0, 65, 0, 16, 6, 26, 11, 70, 1, 2, 127, 32, 0,
+  65, 0, 65, 6, 16, 4, 33, 5, 32, 5, 16, 8, 4, 64, 65, 0, 15, 11, 32, 5, 32, 2, 32, 3, 65, 0,
+  16, 6, 26, 32, 1, 32, 5, 16, 5, 33, 6, 32, 6, 65, 0, 74, 4, 64, 32, 6, 16, 1, 11, 32, 5, 65,
+  16, 65, 5, 32, 4, 65, 0, 16, 7, 26, 32, 5, 11, 41, 0, 32, 0, 35, 1, 70, 4, 64, 35, 3, 65, 1,
+  106, 36, 3, 5, 32, 0, 35, 0, 70, 4, 64, 35, 3, 65, 1, 107, 36, 3, 5, 65, 0, 15, 11, 11, 16,
+  10, 65, 0, 11, 148, 1, 1, 5, 127, 16, 0, 33, 0, 32, 0, 16, 8, 4, 64, 15, 11, 32, 0, 65, 240,
+  0, 65, 5, 16, 3, 33, 1, 32, 1, 16, 8, 4, 64, 32, 0, 16, 2, 33, 1, 11, 32, 1, 16, 8, 4, 64,
+  15, 11, 32, 0, 32, 1, 65, 48, 65, 1, 35, 0, 16, 11, 33, 2, 32, 0, 65, 32, 65, 3, 16, 4, 36,
+  2, 35, 2, 16, 8, 4, 64, 15, 11, 32, 1, 35, 2, 16, 5, 33, 4, 32, 4, 65, 0, 74, 4, 64, 32, 4,
+  16, 1, 11, 16, 10, 32, 0, 32, 1, 65, 52, 65, 1, 35, 1, 16, 11, 33, 3, 32, 2, 65, 0, 74, 4,
+  64, 32, 2, 16, 1, 11, 32, 3, 65, 0, 74, 4, 64, 32, 3, 16, 1, 11, 32, 1, 16, 1, 32, 0, 16, 1,
+  11, 11, 67, 7, 0, 65, 0, 11, 6, 98, 117, 116, 116, 111, 110, 0, 65, 16, 11, 5, 99, 108, 105,
+  99, 107, 0, 65, 32, 11, 3, 100, 105, 118, 0, 65, 48, 11, 1, 45, 0, 65, 52, 11, 1, 43, 0, 65,
+  192, 0, 11, 8, 99, 108, 105, 99, 107, 115, 58, 32, 0, 65, 240, 0, 11, 5, 112, 97, 110, 101,
+  108
+]);
+
+const logEl = document.getElementById("log");
+let failures = 0;
+function say(m, c) {
+  console.log(m);
+  const d = document.createElement("div");
+  if (c) d.className = c;
+  d.textContent = m;
+  logEl.appendChild(d);
+}
+function check(cond, what) {
+  if (cond) say("PASS  " + what, "ok");
+  else { failures++; say("FAIL  " + what, "fail"); }
+}
+function counterText() {
+  for (const d of document.getElementsByTagName("div"))
+    if (d.id !== "log" && /^clicks: /.test(d.textContent)) return d.textContent;
+  return null;
+}
+
+(function () {
+ try {
+  logEl.textContent = "";
+  say("step: start");
+  if (typeof ServoWasmDom === "undefined") {
+    say("FAIL  ServoWasmDom undefined — needs --features wasm_dom and the pref", "fail");
+    return;
+  }
+
+  const id = ServoWasmDom.createInstance();
+  say("step: createInstance -> " + id);
+  const imports = ServoWasmDom.importObject(id);
+  say("step: importObject ok");
+  const mod = new WebAssembly.Module(WASM);
+  say("step: Module compiled");
+  const instance = new WebAssembly.Instance(mod, imports);
+  say("step: Instance created");
+  ServoWasmDom.bindMemory(id, instance.exports.memory);
+  ServoWasmDom.bindDispatcher(id, instance.exports._servo_dom_dispatch);
+  check(true, "module instantiated, memory and dispatcher bound");
+
+  say("step: calling _servo_dom_start");
+  instance.exports._servo_dom_start();
+  say("step: _servo_dom_start returned");
+  const buttons = document.getElementsByTagName("button");
+  check(buttons.length === 2, "module created two buttons (got " + buttons.length + ")");
+  const minus = buttons[0], plus = buttons[1];
+  check(minus.textContent === "-" && plus.textContent === "+",
+        "buttons are labelled - and + (got '" + minus.textContent + "', '" + plus.textContent + "')");
+  check(counterText() === "clicks: 0", "counter starts at 0 (got " + counterText() + ")");
+
+  // Synthetic click -> the DOM dispatches -> the host trampoline -> the module's handler.
+  say("step: about to dispatchEvent");
+  plus.dispatchEvent(new Event("click"));
+  say("step: dispatchEvent returned");
+  check(counterText() === "clicks: 1", "one + click -> 1 (got " + counterText() + ")");
+
+  plus.click();
+  plus.click();
+  check(counterText() === "clicks: 3", "three + clicks -> 3 (got " + counterText() + ")");
+
+  // The second callback id must reach a different handler through the same dispatcher.
+  minus.click();
+  check(counterText() === "clicks: 2", "- click -> 2 (got " + counterText() + ")");
+  for (let i = 0; i < 5; i++) minus.click();
+  check(counterText() === "clicks: -3", "counter goes negative (got " + counterText() + ")");
+  for (let i = 0; i < 3; i++) plus.click();
+  check(counterText() === "clicks: 0", "back to zero (got " + counterText() + ")");
+
+  // The listener holds two long-lived handles by design (the counter node, and nothing else
+  // transient), so assert it is not *growing* per click rather than that it is zero.
+  const before = ServoWasmDom.handleCount(id);
+  plus.click();
+  minus.click();
+  const after = ServoWasmDom.handleCount(id);
+  check(after === before, "a click leaks no handles (" + before + " -> " + after + ")");
+
+  for (let i = 0; i < 12; i++) plus.click();
+  check(counterText() === "clicks: 12",
+        "multi-digit counter past ten (got " + counterText() + ")");
+
+  ServoWasmDom.tearDown(id);
+  const afterTeardown = counterText();
+  plus.click();
+  check(counterText() === afterTeardown,
+        "a listener whose instance was torn down is a silent no-op");
+
+  say("");
+  say(failures === 0 ? "ALL CHECKS PASSED" : failures + " CHECK(S) FAILED",
+      failures === 0 ? "ok" : "fail");
+ } catch (e) { say("FAIL  threw: " + e, "fail"); }
+})();
+</script>

@@ -1,0 +1,95 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>wasm-dom: module instantiation</title>
+<link rel="help" href="https://github.com/servo/servo">
+<script src="/resources/testharness.js"></script>
+<script src="/resources/testharnessreport.js"></script>
+<script src="resources/wasm-dom.js"></script>
+<body>
+<div id="fixture"></div>
+<script>
+// The parts that only exist for a real module: instantiating against the host's import
+// object, calling the start export, and dispatching an event back into the module.
+//
+// marker.wasm is hand-written .wat with no toolchain, no allocator and no JavaScript in it.
+
+promise_test(async () => {
+  assert_implements_optional(
+    typeof ServoWasmDom !== "undefined",
+    "ServoWasmDom requires the wasm_dom Cargo feature",
+  );
+  const bytes = await (await fetch("resources/marker.wasm")).arrayBuffer();
+
+  const id = ServoWasmDom.createInstance();
+  const { instance } = await WebAssembly.instantiate(bytes, ServoWasmDom.importObject(id));
+  // Ordered on purpose: the import object has to exist before the module is instantiated, but
+  // the module's exported memory only exists afterwards. Making that explicit beat hiding it
+  // behind mutable state.
+  ServoWasmDom.bindMemory(id, instance.exports.memory);
+  ServoWasmDom.bindDispatcher(id, instance.exports._servo_dom_dispatch);
+
+  instance.exports._servo_dom_start();
+
+  const div = document.querySelector("#fixture div");
+  assert_true(!!div, "the module created a <div> in the live document");
+  assert_equals(div.textContent, "ok", "…and set its text");
+  assert_equals(ServoWasmDom.handleCount(id), 1,
+                "start keeps exactly the one handle it still needs, and drops the rest");
+
+  ServoWasmDom.tearDown(id);
+  document.querySelector("#fixture").textContent = "";
+}, "a module builds DOM through its imports");
+
+promise_test(async () => {
+  assert_implements_optional(
+    typeof ServoWasmDom !== "undefined",
+    "ServoWasmDom requires the wasm_dom Cargo feature",
+  );
+  const bytes = await (await fetch("resources/marker.wasm")).arrayBuffer();
+
+  const id = ServoWasmDom.createInstance();
+  const { instance } = await WebAssembly.instantiate(bytes, ServoWasmDom.importObject(id));
+  ServoWasmDom.bindMemory(id, instance.exports.memory);
+  ServoWasmDom.bindDispatcher(id, instance.exports._servo_dom_dispatch);
+  instance.exports._servo_dom_start();
+
+  const div = document.querySelector("#fixture div");
+  const imports = ServoWasmDom.importObject(id);
+
+  // Register a listener from JavaScript against the same instance, then click. The module's
+  // own dispatcher runs and rewrites its div, which is the full round trip: host → module →
+  // DOM, with no author JavaScript in the module's half of it.
+  const memory = new Uint8Array(instance.exports.memory.buffer);
+  const encoded = new TextEncoder().encode("click");
+  memory.set(encoded, 512);
+  const target = imports["servo:dom/core"].document();
+  const found = imports["servo:dom/document"]["get-element-by-id"](
+    target, 16, 7);  // "fixture", already in the module's data segment
+  assert_greater_than(found, 0);
+  assert_equals(
+    imports["servo:dom/event-target"]["add-event-listener"](found, 512, 5, 4, 0), 0);
+
+  document.querySelector("#fixture").click();
+  assert_equals(div.textContent, "4", "the module's dispatcher ran with callback id 4");
+
+  ServoWasmDom.tearDown(id);
+  document.querySelector("#fixture").textContent = "";
+}, "an event dispatches back into the module");
+
+promise_test(async t => {
+  assert_implements_optional(
+    typeof ServoWasmDom !== "undefined",
+    "ServoWasmDom requires the wasm_dom Cargo feature",
+  );
+  const id = ServoWasmDom.createInstance();
+  t.add_cleanup(() => ServoWasmDom.tearDown(id));
+  // A module importing a name the host does not provide must fail at link time with a
+  // LinkError, not trap later at an arbitrary point during execution.
+  const bytes = await (await fetch("resources/bad-import.wasm")).arrayBuffer();
+  await promise_rejects_js(
+    t, WebAssembly.LinkError,
+    WebAssembly.instantiate(bytes, ServoWasmDom.importObject(id)),
+  );
+}, "an unknown import fails at link time");
+</script>
+</body>

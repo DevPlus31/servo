@@ -1,0 +1,250 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>wasm-dom: ABI invariants</title>
+<link rel="help" href="https://github.com/servo/servo">
+<script src="/resources/testharness.js"></script>
+<script src="/resources/testharnessreport.js"></script>
+<script src="resources/wasm-dom.js"></script>
+<body>
+<script>
+// The safety-relevant half of the ABI: handle lifetimes, type confusion, linear-memory
+// bounds, and the string protocol. These are the properties the whole design rests on, so
+// they are asserted directly rather than inferred from a working demo.
+
+wasm_dom_test(h => {
+  const doc = h.core.document();
+  assert_greater_than(doc, 0, "document() should return a live handle");
+  assert_not_equals(doc, 0, "0 is reserved for null and can never name a live object");
+}, "core.document is a usable bootstrap root");
+
+wasm_dom_test(h => {
+  // SDA v0. Mirrors SDA_ABI_VERSION in script_bindings/wasm_abi.rs; a module reads this to
+  // refuse a host it was not built against.
+  assert_equals(h.core["abi-version"](), 0, "ABI version should be 0");
+}, "core.abi-version reports the current ABI");
+
+// ── Handle lifetime ───────────────────────────────────────────────────────────────────────
+
+wasm_dom_test(h => {
+  const doc = h.core.document();
+  assert_equals(h.handleCount(), 1, "one handle after one call");
+  assert_equals(h.core["handle-drop"](doc), SDA.OK);
+  assert_equals(h.handleCount(), 0, "dropping releases the slot");
+}, "handles are released by handle-drop");
+
+wasm_dom_test(h => {
+  const doc = h.core.document();
+  h.core["handle-drop"](doc);
+  // The slot is now free and will be reused, but with a bumped generation — so the old
+  // integer must not resolve to whatever lands there next. This is the ABA prevention the
+  // security argument depends on, and it is the single most important assertion in the file.
+  assert_equals(h.document["get-body"](doc), SDA.STALE_HANDLE,
+                "a dropped handle must not resolve after its slot is reused");
+}, "a dropped handle is stale, not merely invalid");
+
+wasm_dom_test(h => {
+  assert_equals(h.document["get-body"](0), SDA.NULL_HANDLE,
+                "0 is null and is rejected where a value is required");
+  assert_equals(h.document["get-body"](999999), SDA.INVALID_HANDLE,
+                "a handle naming no slot is rejected");
+}, "null and out-of-range handles are rejected distinctly");
+
+wasm_dom_test(h => {
+  const doc = h.core.document();
+  const [p, n] = h.write("div");
+  const div = h.document["create-element"](doc, p, n);
+  assert_greater_than(div, 0);
+  // An Element handle passed where a Document is required. The resolve does a real
+  // prototype-chain check, so this cannot be a type confusion even though the table is
+  // type-erased.
+  assert_equals(h.document["get-body"](div), SDA.WRONG_TYPE,
+                "a live handle of the wrong interface is rejected");
+}, "handles are type-checked on every resolve");
+
+wasm_dom_test(h => {
+  const a = h.core.document();
+  const b = h.core.document();
+  assert_not_equals(a, b, "v1 does not intern handles: two calls give two integers");
+  assert_equals(h.core["handle-eq"](a, b), 1, "…but handle-eq says they are the same object");
+}, "handle-eq compares identity, since handles are not interned");
+
+wasm_dom_test(h => {
+  h.core.document();
+  h.core.document();
+  assert_equals(h.handleCount(), 2);
+  h.tearDown();
+  assert_equals(ServoWasmDom.handleCount(h.id), 0, "teardown releases everything");
+}, "teardown clears the handle table");
+
+wasm_dom_test(h => {
+  const doc = h.core.document();
+  h.tearDown();
+  assert_equals(h.document["get-body"](doc), SDA.INSTANCE_TORN_DOWN,
+                "calls after teardown fail rather than touching freed state");
+}, "a torn-down instance rejects further calls");
+
+wasm_dom_test(h => {
+  h.tearDown();
+  h.tearDown();  // idempotent: a second teardown is a no-op, not an error
+  // A dead instance is InvalidStateError, not NotFoundError: the index is perfectly valid,
+  // and "not found" would send an author hunting for a typo that is not there.
+  assert_throws_dom("InvalidStateError", () => ServoWasmDom.importObject(h.id));
+  assert_throws_dom("InvalidStateError", () => ServoWasmDom.bindMemory(h.id, h.memory));
+}, "binding to a torn-down instance throws InvalidStateError, and teardown is idempotent");
+
+// ── Handle scopes ─────────────────────────────────────────────────────────────────────────
+
+wasm_dom_test(h => {
+  const before = h.handleCount();
+  const token = h.core["handle-scope-enter"]();
+  assert_greater_than(token, 0, "a scope token is non-zero");
+  h.core.document();
+  h.core.document();
+  assert_equals(h.handleCount(), before + 2, "handles minted inside the scope are live");
+  assert_equals(h.core["handle-scope-exit"](token), SDA.OK);
+  assert_equals(h.handleCount(), before,
+                "exit releases everything minted inside, in bulk");
+}, "a handle scope releases its allocations on exit");
+
+wasm_dom_test(h => {
+  const outer = h.core["handle-scope-enter"]();
+  const inner = h.core["handle-scope-enter"]();
+  // Scopes are strictly LIFO: closing the outer one first would let a module unwind past a
+  // scope it never closed, so it is refused rather than guessed at.
+  assert_equals(h.core["handle-scope-exit"](outer), SDA.INVALID_SCOPE);
+  assert_equals(h.core["handle-scope-exit"](inner), SDA.OK);
+  assert_equals(h.core["handle-scope-exit"](outer), SDA.OK, "…and now the outer one closes");
+}, "scope tokens are LIFO and a non-innermost token is rejected");
+
+// ── Linear memory ─────────────────────────────────────────────────────────────────────────
+
+wasm_dom_test(h => {
+  const doc = h.core.document();
+  const size = h.memory.buffer.byteLength;
+  for (const [ptr, len, label] of [
+    [-1, 3, "negative pointer"],
+    [0, -1, "negative length"],
+    [size, 1, "one byte past the end"],
+    [size - 1, 2, "straddling the end"],
+    [0x7fffffff, 0x7fffffff, "a pair that would overflow 32-bit arithmetic"],
+  ]) {
+    assert_equals(h.document["create-element"](doc, ptr, len), SDA.OUT_OF_BOUNDS, label);
+  }
+}, "linear-memory ranges are bounds-checked");
+
+wasm_dom_test(h => {
+  const doc = h.core.document();
+  // A lone continuation byte: never valid UTF-8. The ABI is strict rather than lossy, so a
+  // module is told rather than silently handed replacement characters it never wrote.
+  h.bytes.set([0x80, 0x80], SCRATCH);
+  assert_equals(h.document["create-element"](doc, SCRATCH, 2), SDA.INVALID_UTF8);
+}, "malformed UTF-8 is rejected, not replaced");
+
+wasm_dom_test(h => {
+  const doc = h.core.document();
+  const div = h.document["create-element"](doc, ...h.write("div"));
+  const size = h.memory.buffer.byteLength;
+  // Zero length exactly at the end of memory is in range: it names an empty slice, not an
+  // out-of-bounds byte. Easy to get wrong with a `ptr <= len` style check.
+  //
+  // set-text-content rather than create-element, because the empty string is a *valid*
+  // textContent but an invalid element name — createElement("") throws InvalidCharacterError
+  // and would never reach the bounds check being tested here.
+  assert_equals(h.node["set-text-content"](div, size, 0, 0), SDA.OK);
+  assert_equals(h.node["get-text-content"](div, SCRATCH + 512, 64), 0, "…and set it to empty");
+}, "a zero-length range at the very end of memory is valid");
+
+// ── The string protocol ───────────────────────────────────────────────────────────────────
+
+wasm_dom_test(h => {
+  const doc = h.core.document();
+  const [p, n] = h.write("div");
+  const div = h.document["create-element"](doc, p, n);
+  const out = SCRATCH + 512;
+
+  // textContent of a fresh element is the empty string, which returns 0 — and 0 must be
+  // distinguishable from null (-1). Collapsing the two is the classic mistake here.
+  assert_equals(h.node["get-text-content"](div, out, 64), 0, "empty string is length 0");
+  assert_equals(h.node["get-text-content"](doc, out, 64), SDA.NULL,
+                "a Document has null textContent, which is not the empty string");
+}, "null and empty string are distinct in the string protocol");
+
+wasm_dom_test(h => {
+  const doc = h.core.document();
+  const [p, n] = h.write("div");
+  const div = h.document["create-element"](doc, p, n);
+  const long = "x".repeat(200);
+  const [lp, ln] = h.write(long, SCRATCH + 8);
+  assert_equals(h.node["set-text-content"](div, lp, ln, 0), SDA.OK);
+
+  const out = SCRATCH + 512;
+  // Too small on purpose: the host must write nothing, report the full length, and hold the
+  // value so the retry does not re-run the DOM getter.
+  assert_equals(h.node["get-text-content"](div, out, 8), 200, "returns the true length");
+  assert_equals(h.read(out, 8), "\0".repeat(8), "nothing was written into the short buffer");
+  assert_equals(h.core["string-read"](out, 200), 200, "the stash still holds the value");
+  assert_equals(h.read(out, 200), long);
+  assert_equals(h.core["string-read"](out, 200), 0, "the stash is drained, not copied");
+}, "an oversized string is stashed and drained exactly once");
+
+wasm_dom_test(h => {
+  const doc = h.core.document();
+  const [p, n] = h.write("div");
+  const div = h.document["create-element"](doc, p, n);
+  const long = "y".repeat(120);
+  h.node["set-text-content"](div, ...h.write(long, SCRATCH + 8), 0);
+
+  const out = SCRATCH + 512;
+  assert_equals(h.node["get-text-content"](div, out, 8), 120, "value goes to the stash");
+  // A drain with a still-too-small buffer must fail loudly -- and must NOT destroy the
+  // value. This is the regression test for a bug where take-then-write dropped the bytes on
+  // the floor, making one undersized retry permanently destructive.
+  assert_equals(h.core["string-read"](out, 8), SDA.OUT_OF_BOUNDS);
+  assert_equals(h.core["string-read"](out, 120), 120,
+                "the value survives a failed drain and a correct retry succeeds");
+  assert_equals(h.read(out, 120), long);
+}, "a failed drain does not destroy the stashed value");
+
+wasm_dom_test(h => {
+  const doc = h.core.document();
+  const [p, n] = h.write("div");
+  const div = h.document["create-element"](doc, p, n);
+  const out = SCRATCH + 512;
+
+  assert_equals(h.node["set-text-content"](div, ...h.write("hello", SCRATCH + 8), 0), SDA.OK);
+  assert_equals(h.readString(h.node["get-text-content"], div), "hello");
+
+  // The is-null flag. The hand-written shim this replaced hardcoded Some(..) and could not
+  // clear a node at all; the generated one carries `DOMString?` faithfully.
+  assert_equals(h.node["set-text-content"](div, 0, 0, 1), SDA.OK, "is-null = 1 clears");
+  assert_equals(h.node["get-text-content"](div, out, 64), 0,
+                "clearing textContent leaves the empty string, per spec");
+}, "the nullable-string encoding round-trips");
+
+// ── Errors ────────────────────────────────────────────────────────────────────────────────
+
+wasm_dom_test(h => {
+  const doc = h.core.document();
+  // An invalid element name: DOM throws InvalidCharacterError, which must arrive as a status
+  // rather than a trap, so the module can recover.
+  assert_equals(h.document["create-element"](doc, ...h.write("<bad>")), SDA.INVALID_CHARACTER);
+  assert_equals(h.core["error-code"](), SDA.INVALID_CHARACTER, "the code is retrievable");
+
+  const out = SCRATCH + 512;
+  const len = h.core["error-message"](out, 256);
+  assert_greater_than(len, 0, "a human-readable message is available");
+  assert_equals(h.core["error-message"](out, 256), 0, "the message drains once");
+}, "DOM errors arrive as recoverable status codes with a message");
+
+wasm_dom_test(h => {
+  const fresh = ServoWasmDom.createInstance();
+  const imports = ServoWasmDom.importObject(fresh);
+  // No bindMemory call: anything touching linear memory must fail cleanly rather than
+  // dereferencing a null Memory object.
+  const doc = imports["servo:dom/core"].document();
+  assert_equals(imports["servo:dom/document"]["create-element"](doc, 0, 3),
+                SDA.MEMORY_DETACHED);
+  ServoWasmDom.tearDown(fresh);
+}, "calls touching memory fail before it is bound");
+</script>
+</body>

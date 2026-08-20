@@ -1,0 +1,122 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>wasm-dom: WebIDL-generated DOM shims</title>
+<link rel="help" href="https://github.com/servo/servo">
+<script src="/resources/testharness.js"></script>
+<script src="/resources/testharnessreport.js"></script>
+<script src="resources/wasm-dom.js"></script>
+<body>
+<div id="fixture"></div>
+<script>
+// Every import here is emitted by codegen/wasm_codegen.py from the WebIDL, so these tests are
+// really about the *generator*: that each lowering it can choose produces a call equivalent to
+// what a JavaScript caller would make. The comparison against the plain-JS DOM is the point —
+// an assertion that only checked the wasm side could pass with both halves wrong.
+
+wasm_dom_test(h => {
+  const doc = h.core.document();
+  const div = h.document["create-element"](doc, ...h.write("div"));
+  assert_greater_than(div, 0);
+  assert_equals(h.readString(h.element["get-tag-name"], div), "DIV",
+                "tagName is uppercase for an HTML element, as in JS");
+  assert_equals(h.readString(h.element["get-local-name"], div), "div");
+}, "document.createElement lowers through the union's string arm");
+
+wasm_dom_test(h => {
+  const doc = h.core.document();
+  const div = h.document["create-element"](doc, ...h.write("div"));
+
+  // setAttribute's value is `(TrustedType or DOMString)`. TrustedType is itself a union of
+  // three interfaces, so the parameter flattens to four arms — the case that broke two
+  // earlier drafts of the union rule. Keying on primitive arms only picks the string.
+  assert_equals(h.element["set-attribute"](div, ...h.write("data-x", SCRATCH),
+                                                ...h.write("hello", SCRATCH + 32)), SDA.OK);
+  assert_equals(h.readString(h.element["get-attribute"], div, ...h.write("data-x")), "hello");
+
+  const body = h.document["get-body"](doc);
+  assert_greater_than(h.node["append-child"](body, div), 0);
+  assert_equals(document.querySelector("div[data-x]").getAttribute("data-x"), "hello",
+                "the attribute is visible to ordinary JS, on the real document");
+  document.querySelector("div[data-x]").remove();
+}, "element.setAttribute reaches the real DOM");
+
+wasm_dom_test(h => {
+  const doc = h.core.document();
+  const div = h.document["create-element"](doc, ...h.write("div"));
+  assert_equals(h.element["get-attribute"](div, ...h.write("nope"), SCRATCH + 512, 64),
+                SDA.NULL, "a missing attribute is null, not the empty string");
+}, "a nullable string return distinguishes absent from empty");
+
+wasm_dom_test(h => {
+  const doc = h.core.document();
+  const div = h.document["create-element"](doc, ...h.write("div"));
+  const name = h.write("hidden");
+
+  // toggleAttribute's `force` is `optional boolean` with *no* default, so it lowers to
+  // Option<bool> and gets a presence slot. Passing 0 there means absent — plain toggling.
+  assert_equals(h.element["toggle-attribute"](div, ...name, 0, 0), 1, "absent force toggles on");
+  assert_equals(h.element["toggle-attribute"](div, ...name, 0, 0), 0, "and back off");
+  assert_equals(h.element["toggle-attribute"](div, ...name, 1, 1), 1, "force = true sets");
+  assert_equals(h.element["toggle-attribute"](div, ...name, 1, 1), 1, "…and is idempotent");
+  assert_equals(h.element["toggle-attribute"](div, ...name, 0, 1), 0, "force = false clears");
+}, "an optional-without-default argument carries a presence flag");
+
+wasm_dom_test(h => {
+  const doc = h.core.document();
+  const parent = h.document["create-element"](doc, ...h.write("div"));
+  const child = h.document["create-element"](doc, ...h.write("span"));
+
+  // insertBefore's second argument is `Node?`; the null handle means "append at the end".
+  const inserted = h.node["insert-before"](parent, child, 0);
+  assert_greater_than(inserted, 0);
+  assert_equals(h.readString(h.node["get-node-name"], inserted), "SPAN");
+}, "a nullable interface argument accepts the null handle");
+
+wasm_dom_test(h => {
+  const doc = h.core.document();
+  const div = h.document["create-element"](doc, ...h.write("div"));
+  // A cycle: appending a node to itself must throw HierarchyRequestError, and that has to
+  // arrive as a status the module can act on rather than as a trap.
+  assert_equals(h.node["append-child"](div, div), SDA.HIERARCHY_REQUEST);
+}, "a throwing DOM operation becomes a status, not a trap");
+
+wasm_dom_test(h => {
+  const doc = h.core.document();
+  const div = h.document["create-element"](doc, ...h.write("div"));
+  // nodeType is `unsigned short`; ELEMENT_NODE is 1.
+  assert_equals(h.node["get-node-type"](div), 1, "integer returns are carried as i32");
+  assert_equals(h.node["get-is-connected"](div), 0, "boolean returns are 0/1");
+}, "integer and boolean returns round-trip");
+
+wasm_dom_test(h => {
+  const doc = h.core.document();
+  const parent = h.document["create-element"](doc, ...h.write("div"));
+  const child = h.document["create-element"](doc, ...h.write("span"));
+  h.node["set-text-content"](child, ...h.write("inner", SCRATCH + 32), 0);
+  h.node["append-child"](parent, child);
+
+  // cloneNode's `deep` is `optional boolean = false`: a plain scalar with a default, so it is
+  // exposed rather than filled in — a wasm i32 has no way to say "absent" anyway. The two
+  // values have to actually differ, or the argument could be ignored and this would pass.
+  const shallow = h.node["clone-node"](parent, 0);
+  const deep = h.node["clone-node"](parent, 1);
+  assert_equals(h.readString(h.node["get-text-content"], shallow), "",
+                "a shallow clone drops the child");
+  assert_equals(h.readString(h.node["get-text-content"], deep), "inner",
+                "a deep clone keeps it");
+}, "an optional scalar with a default stays exposed");
+
+wasm_dom_test(h => {
+  const doc = h.core.document();
+  const body = h.document["get-body"](doc);
+  assert_greater_than(body, 0, "this document has a body");
+
+  // getElementById on a real element in the page, proving the shim reaches the live tree
+  // rather than some detached copy.
+  const found = h.document["get-element-by-id"](doc, ...h.write("fixture"));
+  assert_greater_than(found, 0);
+  assert_equals(h.readString(h.element["get-id"], found), "fixture");
+  assert_equals(h.document["get-element-by-id"](doc, ...h.write("absent")), SDA.NULL);
+}, "document.getElementById finds live elements and reports misses as null");
+</script>
+</body>

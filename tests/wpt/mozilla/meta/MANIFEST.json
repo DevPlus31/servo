@@ -11253,6 +11253,42 @@
      "b45a87aa614eef6cbe21a77a7b75e81e9a9f8c95",
      []
     ],
+    "wasm-dom": {
+     "csp.html.headers": [
+      "32b65539e69ba07001b62f2574fbeaccc13b2236",
+      []
+     ],
+     "resources": {
+      "README.md": [
+       "32604e5f6afc7a5abbb0cbfa2f8186cdedbe9a0f",
+       []
+      ],
+      "bad-import.wasm": [
+       "c8af671007b2b45f7d7d94c0dfeef01a7dc486ca",
+       []
+      ],
+      "bad-import.wat": [
+       "8d856e1918caae14add1efd69749f41833918b90",
+       []
+      ],
+      "build.sh": [
+       "46cdb7ec3e98de39ceeec4aa4b118807b6ef4c72",
+       []
+      ],
+      "marker.wasm": [
+       "7c34bd5ed72506a6b58ae761e7868567e103cdd8",
+       []
+      ],
+      "marker.wat": [
+       "85db4e5b0d1236d0db25d3840c84ed76853ca954",
+       []
+      ],
+      "wasm-dom.js": [
+       "99d15802ade6c4a18b1bf7cf6d09c8ac1a96875c",
+       []
+      ]
+     }
+    },
     "webgl": {
      "clearcolor-blue.html": [
       "d534babb2a664b7cb861f1cc253020e319f281e9",
@@ -15187,6 +15223,57 @@
       {}
      ]
     ],
+    "wasm-dom": {
+     "abi.html": [
+      "69e41a392ee65a300b1d9c38891e40f24036b30e",
+      [
+       null,
+       {}
+      ]
+     ],
+     "csp.html": [
+      "b2d3ff36de87c03c246b719b676f5e8d23033652",
+      [
+       null,
+       {}
+      ]
+     ],
+     "events.html": [
+      "de8c796689da634b5958d470218ff666956d99c1",
+      [
+       null,
+       {}
+      ]
+     ],
+     "generated-dom.html": [
+      "c164658d52b45150e7444bb00544d927c93a44c8",
+      [
+       null,
+       {}
+      ]
+     ],
+     "module.html": [
+      "2dce815d1c12fd86e5f483934327d8c85347b99e",
+      [
+       null,
+       {}
+      ]
+     ],
+     "quota.html": [
+      "9005a7f06e385804ab150bc6b313dbc734dda20b",
+      [
+       null,
+       {}
+      ]
+     ],
+     "script-element.html": [
+      "93f62d72b37bc3e83c1b9fd220d62204efa397d7",
+      [
+       null,
+       {}
+      ]
+     ]
+    },
     "weakref.html": [
      "091ff3e67e2999c54fc6e9ee95f7fd331f94501a",
      [

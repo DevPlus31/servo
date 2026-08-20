@@ -1,0 +1,31 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>wasm-dom: blocked by Content Security Policy</title>
+<link rel="help" href="https://github.com/servo/servo">
+<script src="/resources/testharness.js"></script>
+<script src="/resources/testharnessreport.js"></script>
+<body>
+<div id="fixture"></div>
+<!-- This page's .headers file sends `script-src 'self' 'unsafe-inline'` -- which permits
+     this inline harness and the module's fetch, but NOT wasm evaluation: that would need
+     'wasm-unsafe-eval'. The module below is the same marker.wasm the control test runs, so
+     if anything appears in #fixture, CSP failed to gate wasm-dom. -->
+<script type="application/wasm" src="resources/marker.wasm" defer></script>
+<script>
+// The block is reported as an uncaught SecurityError on the window -- visibility is the
+// point, a silently dead module is indistinguishable from a broken one -- so tell the
+// harness not to treat that as a harness failure.
+setup({ allow_uncaught_exception: true });
+
+async_test(t => {
+  assert_implements_optional(
+    typeof ServoWasmDom !== "undefined",
+    "the wasm_dom Cargo feature is required",
+  );
+  addEventListener("load", t.step_func_done(() => {
+    assert_equals(document.querySelector("#fixture div"), null,
+                  "a CSP without wasm-unsafe-eval must keep the module from running");
+  }));
+}, "script-src without wasm-unsafe-eval blocks an application/wasm script");
+</script>
+</body>

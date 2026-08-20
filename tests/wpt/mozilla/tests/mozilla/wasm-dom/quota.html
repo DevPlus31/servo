@@ -1,0 +1,34 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>wasm-dom: instance quota</title>
+<link rel="help" href="https://github.com/servo/servo">
+<script src="/resources/testharness.js"></script>
+<script src="/resources/testharnessreport.js"></script>
+<body>
+<script>
+// Alone in its own file on purpose: this test exhausts the per-global instance registry,
+// and the registry is append-only -- torn-down instances keep their index forever, because
+// trampolines hold indices into it. Any test created after this one on the same page would
+// hit the cap immediately and fail for the wrong reason.
+
+test(() => {
+  assert_implements_optional(
+    typeof ServoWasmDom !== "undefined",
+    "the wasm_dom Cargo feature is required",
+  );
+  // dom_wasm_dom_max_instances defaults to 256. Create up to the cap, then expect refusal.
+  let created = 0;
+  try {
+    for (; created < 1000; created++) {
+      ServoWasmDom.createInstance();
+    }
+  } catch (error) {
+    assert_equals(error.name, "QuotaExceededError",
+                  "the refusal is a QuotaExceededError, not an arbitrary failure");
+    assert_equals(created, 256, "the default cap is dom_wasm_dom_max_instances");
+    return;
+  }
+  assert_unreached("createInstance never hit the cap after 1000 calls");
+}, "createInstance is bounded by dom_wasm_dom_max_instances");
+</script>
+</body>

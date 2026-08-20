@@ -1,0 +1,137 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>wasm-dom: event listeners</title>
+<link rel="help" href="https://github.com/servo/servo">
+<script src="/resources/testharness.js"></script>
+<script src="/resources/testharnessreport.js"></script>
+<script src="resources/wasm-dom.js"></script>
+<body>
+<div id="fixture"></div>
+<script>
+// A wasm listener is wrapped in an ordinary `EventListener` and registered through the
+// ordinary `AddEventListener`, with **no changes to eventtarget.rs**. These tests exist to
+// hold that claim honest: capture, once, and removal are not reimplemented here, so if they
+// work it is because the standard path is genuinely being reused.
+//
+// `bindDispatcher` lets the dispatcher be an ordinary JS function, so a real module is not
+// needed to test dispatch — which also means these assertions can inspect exactly what
+// arguments the trampoline passed.
+
+/// Declares a test with a JS dispatcher standing in for the module's `_servo_dom_dispatch`.
+function dispatch_test(body, name) {
+  wasm_dom_test((h, t) => {
+    h.calls = [];
+    ServoWasmDom.bindDispatcher(h.id, (callbackId, eventHandle) => {
+      h.calls.push({ callbackId, eventHandle });
+      return 0;
+    });
+    body(h, t);
+  }, name);
+}
+
+/// A <button> appended to the live document, removed again when the test ends.
+///
+/// The removal is a cleanup rather than a trailing statement so that a failing assertion
+/// cannot leak the button into the next test — `body > button` would then match the wrong
+/// element and the failure would cascade.
+function makeButton(h, t) {
+  const doc = h.core.document();
+  const button = h.document["create-element"](doc, ...h.write("button"));
+  const body = h.document["get-body"](doc);
+  const appended = h.node["append-child"](body, button);
+  const element = document.querySelector("body > button");
+  t.add_cleanup(() => element.remove());
+  return { doc, button, appended, el: element };
+}
+
+dispatch_test((h, t) => {
+  const { button, el } = makeButton(h, t);
+  assert_equals(h.eventTarget["add-event-listener"](
+    button, ...h.write("click"), 7, 0), SDA.OK);
+
+  el.click();
+  assert_equals(h.calls.length, 1, "the module's dispatcher ran");
+  assert_equals(h.calls[0].callbackId, 7, "…with the id the module chose");
+  assert_greater_than(h.calls[0].eventHandle, 0, "…and a handle to the Event");
+}, "a wasm listener receives its own callback id");
+
+dispatch_test((h, t) => {
+  const { button, el } = makeButton(h, t);
+  // Two listeners, distinguished only by id. This is the property that made the two-button
+  // demo a `.wat` change with no host change at all.
+  h.eventTarget["add-event-listener"](button, ...h.write("click"), 1, 0);
+  h.eventTarget["add-event-listener"](button, ...h.write("click"), 2, 0);
+  el.click();
+  assert_array_equals(h.calls.map(c => c.callbackId), [1, 2],
+                      "both ids fire, in registration order");
+}, "one dispatcher serves many listeners, keyed by id");
+
+dispatch_test((h, t) => {
+  const { button, el } = makeButton(h, t);
+  // options bit 1 is `once`. It is honoured by the standard EventTarget machinery, not by
+  // anything in wasm_dom — which is exactly the point.
+  h.eventTarget["add-event-listener"](button, ...h.write("click"), 3, 1 << 1);
+  el.click();
+  el.click();
+  assert_equals(h.calls.length, 1, "a `once` listener fires exactly once");
+}, "the options bitfield reaches AddEventListenerOptions");
+
+dispatch_test((h, t) => {
+  const { button, el } = makeButton(h, t);
+  h.eventTarget["add-event-listener"](button, ...h.write("click"), 4, 0);
+  assert_equals(h.eventTarget["remove-event-listener"](
+    button, ...h.write("click"), 4, 0), SDA.OK);
+  el.click();
+  assert_equals(h.calls.length, 0, "a removed listener does not fire");
+}, "remove-event-listener passes back the identical listener object");
+
+dispatch_test((h, t) => {
+  const { button, el } = makeButton(h, t);
+  h.eventTarget["add-event-listener"](button, ...h.write("click"), 5, 0);
+  const before = h.handleCount();
+  el.click();
+  el.click();
+  el.click();
+  assert_equals(h.handleCount(), before,
+                "each dispatch is wrapped in a handle scope, so the Event handle is released");
+}, "firing a listener leaks no handles");
+
+dispatch_test((h, t) => {
+  const { button, el } = makeButton(h, t);
+  h.eventTarget["add-event-listener"](button, ...h.write("click"), 6, 0);
+  h.tearDown();
+  // The registration is still attached to a live node. Becoming a silent no-op is the
+  // correct behaviour: throwing would surface an error the page cannot act on.
+  el.click();
+  assert_equals(h.calls.length, 0, "a listener outliving its instance is a no-op");
+}, "a listener whose instance was torn down does not fire");
+
+wasm_dom_test((h, t) => {
+  // A dispatcher is free to dispatch another event synchronously; without a bound that
+  // recurses until the stack gives out. The trampoline refuses past
+  // `dom_wasm_dom_max_reentrancy` (default 32), so the dispatcher runs exactly 32 times no
+  // matter how hard it tries to go deeper -- and refusal is a silent no-op, not a throw,
+  // because past the limit there is no useful frame to deliver an error to.
+  let invocations = 0;
+  const doc = h.core.document();
+  const button = h.document["create-element"](doc, ...h.write("button"));
+  const body = h.document["get-body"](doc);
+  h.node["append-child"](body, button);
+  const el = document.querySelector("body > button");
+  t.add_cleanup(() => el.remove());
+
+  ServoWasmDom.bindDispatcher(h.id, () => {
+    invocations += 1;
+    if (invocations < 100) {
+      el.click();  // recurse synchronously, far past the cap
+    }
+    return 0;
+  });
+  h.eventTarget["add-event-listener"](button, ...h.write("click"), 9, 0);
+
+  el.click();
+  assert_equals(invocations, 32,
+                "dispatch stops exactly at dom_wasm_dom_max_reentrancy, not at stack overflow");
+}, "synchronous re-dispatch is bounded by the reentrancy cap");
+</script>
+</body>
