@@ -1,3 +1,114 @@
+# Servo fork — direct DOM access from WebAssembly
+
+> **This fork is an experiment, on the [`wasm-dom`](../../tree/wasm-dom) branch.**
+> It is not a web standard, it is not enabled by default, and it is not production code.
+> Servo's own README follows [below](#the-servo-parallel-browser-engine-project).
+
+Every WebAssembly application on the web today reaches the DOM through author-written
+JavaScript glue — `wasm-bindgen`, Emscripten's `EM_JS`, hand-written imports. This fork lets a
+`.wasm` module create elements, set attributes and text, read properties, and handle events
+with **no JavaScript on the page at all**.
+
+![The two-button counter demo running in Servo: a decrement button, the text "clicks: 7", and
+an increment button, on a page whose only script element is a WebAssembly
+module](docs/images/wasm-dom-events.png)
+
+Both buttons, the counter, and both click handlers above were created by a 922-byte
+hand-written WebAssembly module.
+
+## Why this is tractable in Servo
+
+Servo's DOM operations are already plain Rust traits over plain Rust types — its WebIDL
+codegen emits `fn AppendChild(&self, cx: &mut JSContext, node: &D::Node) -> Fallible<DomRoot<D::Node>>`,
+with no `JSVal` anywhere. The JavaScript bindings are just *one consumer* of those traits, so
+a WebAssembly host layer can be a **second consumer**, with no JS value conversion in between.
+
+In Gecko, Blink, or WebKit the same work would mean inventing a non-JS DOM API from scratch
+first. Here it already exists.
+
+## The smallest working example
+
+```wat
+(import "servo:dom/core"     "document"       (func $document (result i32)))
+(import "servo:dom/document" "create-element" (func $create_element (param i32 i32 i32) (result i32)))
+(import "servo:dom/node"     "append-child"   (func $append_child (param i32 i32) (result i32)))
+```
+
+A 371-byte module, loaded by a 147-byte page:
+
+```html
+<script type="application/wasm" src="wasm-dom-hello.wasm" defer></script>
+```
+
+![A browser page showing the text "hello from wasm"](docs/images/wasm-dom-hello.png)
+
+## `<script type="application/wasm">`
+
+This is the piece that makes "no JavaScript" literal rather than a figure of speech. Without
+it a page still needs `WebAssembly.instantiate(...)` somewhere — and that is JavaScript, so
+the claim collapses.
+
+**The type is currently dead space, which is why it was safe to claim.** Per the HTML
+Standard, a `<script>` whose type is not a JavaScript MIME type, `"module"`, or `"importmap"`
+is *inert*: the browser fetches nothing and executes nothing. Every browser today, Servo
+included, silently ignores `application/wasm`. So this fork is not overriding behaviour, it is
+occupying a hole — and with the preference off, a page renders byte-for-byte identically to
+an unmodified build. That is checked, not assumed.
+
+**It inherits classic script semantics for free.** `defer`, `async`, and parser-blocking all
+behave exactly as they do for JavaScript, because the only thing Servo's `get_script_kind()`
+tests for is *module* scripts — so wasm falls through to the classic path untouched. The
+`defer` in the example above is load-bearing for exactly this reason: without it the script
+runs before `<body>` exists and the module appends into nothing.
+
+**Security comes from reusing the existing path, not from new code.** The fetch goes through
+the same `script_fetch_request` a classic script uses, so `script-src`, nonces, and
+Subresource Integrity are enforced identically. Compilation deliberately goes through the
+`WebAssembly.Module` constructor rather than a lower-level JSAPI entry point, because that
+triggers SpiderMonkey's `CanCompileStrings` hook — already wired to Servo's CSP check — so a
+page with `script-src 'self'` and no `wasm-unsafe-eval` cannot run this even from a
+same-origin URL. One deliberate divergence: opaque and filtered responses are rejected, since
+the MIME type of an opaque response cannot be verified.
+
+The module needs one export, called once the document is ready:
+
+```wat
+(func (export "_servo_dom_start") ...)
+```
+
+**This is not the standards-track proposal.** ESM integration —
+`import { thing } from "./module.wasm"` — is a real, separate effort that needs the JS engine
+to produce a genuine module record, and Servo has an open TODO for it. This claims an
+orthogonal, currently-inert `type` value and does not touch that work.
+
+## Trying it
+
+Both gates are off by default and both are required:
+
+```bash
+./mach build --dev --features wasm_dom
+./mach run --pref dom_wasm_dom_enabled=true tests/html/wasm-dom-events.html
+```
+
+## What is in it
+
+- **88 DOM imports generated from WebIDL** by `components/script_bindings/codegen/wasm_codegen.py`,
+  across `Node`, `Text`, `CharacterData`, `Event`, `Document` and `Element`
+- **Event listeners with zero changes to `eventtarget.rs`** — a wasm callback is wrapped in an
+  ordinary `EventListener`, so capture, `once`, removal and bubbling come for free
+- **`<script type="application/wasm">`** as a JavaScript-free entry point
+- **A handle table with generation counters** and permanent slot retirement, so a released
+  handle can never resolve to whatever lands in its slot next
+
+![Test harness output listing twelve passing checks, ending in ALL CHECKS
+PASSED](docs/images/wasm-dom-harness.png)
+
+**Read [`docs/wasm-dom.md`](docs/wasm-dom.md)** for the ABI, the design decisions and, more
+usefully, the [limitations](docs/wasm-dom.md#limitations) — no handle interning, `i32`-only
+arguments, no sequences or dictionaries, and strings copied on every call.
+
+---
+
 # The Servo Parallel Browser Engine Project
 
 Servo is a prototype web browser engine written in the
