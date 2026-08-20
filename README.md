@@ -103,7 +103,29 @@ On this fork both gates default on, so a plain build is enough:
   handle can never resolve to whatever lands in its slot next
 - **A demo compiled from plain Rust** — a 2.4 KB `no_std` module, no wasm-bindgen, no
   allocator, binding the imports with nothing but `#[link(wasm_import_module = "servo:dom/…")]`.
-  It renders an orders table with computed totals and click-to-select rows.
+  It renders an orders table with computed totals and click-to-select rows:
+
+![The orders demo running in Servo: a table of five users with order counts and amounts, two
+rows click-selected and highlighted, and a totals row computed in Rust reading 63 orders and
+$6,025.49](docs/images/wasm-dom-orders.png)
+
+The highlighted rows were selected by clicking them — the module's dispatcher toggles the
+class from inside wasm. And this is the *entire* HTML of that page (styles elided); there is
+no script in it but the module:
+
+```html
+<!doctype html>
+<meta charset="utf-8">
+<title>Servo: an orders table from Rust-compiled WebAssembly</title>
+<style>/* table styling — no behaviour */</style>
+
+<h1>An orders table from Rust</h1>
+<p>This page contains no JavaScript. …</p>
+
+<div id="panel"></div>
+
+<script type="application/wasm" src="wasm-dom-orders.wasm" defer></script>
+```
 
 ![Test harness output listing twelve passing checks, ending in ALL CHECKS
 PASSED](docs/images/wasm-dom-harness.png)

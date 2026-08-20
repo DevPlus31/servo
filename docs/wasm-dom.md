@@ -201,8 +201,9 @@ cargo build --release --target wasm32-unknown-unknown --target-dir target
 The `.wasm` is checked in beside the page, like the `.wat` demos, so the demo works without
 the wasm target installed.
 
-![An orders table rendered in Servo: five users with order counts and amounts, a computed
-totals row reading 63 orders and $6,025.49](images/wasm-dom-orders.png)
+![An orders table rendered in Servo: five users with order counts and amounts, two rows
+click-selected and highlighted, and a computed totals row reading 63 orders and
+$6,025.49](images/wasm-dom-orders.png)
 
 ## How the ABI works
 
