@@ -123,7 +123,10 @@ wasm_dom_test((h, t) => {
   ServoWasmDom.bindDispatcher(h.id, () => {
     invocations += 1;
     if (invocations < 100) {
-      el.click();  // recurse synchronously, far past the cap
+      // dispatchEvent, not el.click(): HTMLElement.click() sets a click-in-progress flag
+      // that makes a recursive synthetic click on the same element a spec-mandated no-op,
+      // which would end this test at depth 1 without ever reaching the host's guard.
+      el.dispatchEvent(new Event("click"));
     }
     return 0;
   });
