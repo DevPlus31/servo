@@ -22,6 +22,7 @@ use net_traits::request::{
 use net_traits::{FetchMetadata, Metadata, NetworkError, ResourceFetchTiming};
 use script_bindings::cell::DomRefCell;
 use servo_base::id::WebViewId;
+use servo_config::pref;
 use servo_url::ServoUrl;
 use style::attr::AttrValue;
 use style::str::{HTML_SPACE_CHARACTERS, StaticStringVec};
@@ -226,6 +227,14 @@ pub(crate) enum ScriptType {
     Classic,
     Module,
     ImportMap,
+    /// Experimental, non-standard: a WebAssembly module that drives the DOM directly.
+    ///
+    /// Claiming `type="application/wasm"` is safe because HTML makes any `type` that is not
+    /// a JavaScript MIME type, `"module"`, or `"importmap"` **inert** — such a script never
+    /// executes today. So this occupies guaranteed-dead space, and with the pref off the
+    /// behaviour is bit-identical to before.
+    #[cfg(feature = "wasm_dom")]
+    Wasm,
 }
 
 /// <https://html.spec.whatwg.org/multipage/#steps-to-run-when-the-result-is-ready>
@@ -268,6 +277,19 @@ pub(crate) enum Script {
     Classic(ClassicScript),
     Module(#[conditional_malloc_size_of] Rc<ModuleTree>),
     ImportMap(Fallible<ImportMap>),
+    #[cfg(feature = "wasm_dom")]
+    Wasm(WasmScript),
+}
+
+/// A fetched WebAssembly module awaiting instantiation.
+#[cfg(feature = "wasm_dom")]
+#[derive(JSTraceable, MallocSizeOf)]
+pub(crate) struct WasmScript {
+    /// The raw module bytes. Kept undecoded — unlike a classic script there is no character
+    /// encoding involved.
+    pub(crate) bytes: Vec<u8>,
+    #[no_trace]
+    pub(crate) url: ServoUrl,
 }
 
 /// The context required for asynchronously loading an external script source.
@@ -373,6 +395,20 @@ impl FetchResponseListener for ClassicContext {
         };
 
         let metadata = self.metadata.take().unwrap();
+
+        // Captured before the fields below are moved out of `metadata`. Reading
+        // `self.metadata` after the `take` above always yields `None` — which silently made
+        // the wasm MIME check reject every module until it was caught by actually running one.
+        #[cfg(feature = "wasm_dom")]
+        let content_type_essence: Option<String> = metadata.content_type.as_ref().map(|ct| {
+            ct.to_string()
+                .split(';')
+                .next()
+                .unwrap_or_default()
+                .trim()
+                .to_ascii_lowercase()
+        });
+
         let final_url = metadata.final_url;
 
         // Step 5.3. Let potentialMIMETypeForEncoding be the result of extracting a MIME type given response's header list.
@@ -381,6 +417,30 @@ impl FetchResponseListener for ClassicContext {
             .charset
             .and_then(|encoding| Encoding::for_label(encoding.as_bytes()))
             .unwrap_or(self.character_encoding);
+
+        // A wasm module is bytes, not text: skip decoding entirely. The MIME type is checked
+        // strictly, mirroring what `consume_stream` already does for
+        // `WebAssembly.compileStreaming`, because a permissive check here would let any
+        // same-origin response be handed to the engine.
+        #[cfg(feature = "wasm_dom")]
+        if elem.get_script_type() == Some(ScriptType::Wasm) {
+            let is_wasm_mime = content_type_essence.as_deref() == Some("application/wasm");
+            if !is_wasm_mime {
+                warn!(
+                    "wasm-dom: refusing {} — served as {:?}, expected application/wasm",
+                    final_url,
+                    content_type_essence.as_deref().unwrap_or("<none>"),
+                );
+                *elem.result.borrow_mut() = Some(Err(()));
+            } else {
+                *elem.result.borrow_mut() = Some(Ok(Script::Wasm(WasmScript {
+                    bytes: std::mem::take(&mut self.data),
+                    url: final_url,
+                })));
+            }
+            finish_fetching_a_script(&elem, self.kind, cx);
+            return;
+        }
 
         // Step 5.5. Let sourceText be the result of decoding bodyBytes to Unicode, using encoding as the fallback encoding.
         let (mut source_text, _, _) = encoding.decode(&self.data);
@@ -852,6 +912,13 @@ impl HTMLScriptElement {
                         },
                     );
                 },
+                // The fetch is byte-identical to a classic script's — same CORS setting,
+                // nonce, and integrity metadata. Only the interpretation of the bytes
+                // differs, which happens in `process_response_eof`.
+                #[cfg(feature = "wasm_dom")]
+                ScriptType::Wasm => {
+                    fetch_a_classic_script(self, kind, url, cors_setting, options, encoding);
+                },
                 ScriptType::ImportMap => (),
             }
         } else {
@@ -933,6 +1000,12 @@ impl HTMLScriptElement {
                                 }));
                         },
                     );
+                },
+                // A wasm module cannot be written inline in a text node.
+                #[cfg(feature = "wasm_dom")]
+                ScriptType::Wasm => {
+                    self.queue_error_event();
+                    return;
                 },
                 ScriptType::ImportMap => {
                     // Step 32.1 Let result be the result of creating an import map
@@ -1027,6 +1100,11 @@ impl HTMLScriptElement {
                 self.owner_global()
                     .run_a_module_script(cx, module_tree, false);
             },
+            #[cfg(feature = "wasm_dom")]
+            Script::Wasm(script) => {
+                document.set_current_script(None);
+                self.owner_global().run_a_wasm_dom_script(cx, script);
+            },
             Script::ImportMap(import_map) => {
                 // Step 6."importmap".1. Register an import map given el's relevant global object and el's result.
                 register_import_map(cx, &self.owner_global(), import_map);
@@ -1100,6 +1178,16 @@ impl HTMLScriptElement {
                     .eq_ignore_ascii_case("importmap")
                 {
                     return Some(ScriptType::ImportMap);
+                }
+
+                // Gated here rather than deeper so that with the pref off this method
+                // returns exactly what it did before, and the script stays inert.
+                #[cfg(feature = "wasm_dom")]
+                if pref!(dom_wasm_dom_enabled) &&
+                    ty.trim_matches(HTML_SPACE_CHARACTERS)
+                        .eq_ignore_ascii_case("application/wasm")
+                {
+                    return Some(ScriptType::Wasm);
                 }
 
                 if SCRIPT_JS_MIMES.iter().any(|mime| {

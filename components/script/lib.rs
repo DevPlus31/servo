@@ -48,6 +48,9 @@ pub(crate) mod script_runtime;
 pub(crate) mod serviceworker_manager;
 pub mod test;
 mod timers;
+/// Experimental, non-standard: direct DOM access from WebAssembly. Off by default.
+#[cfg(feature = "wasm_dom")]
+pub(crate) mod wasm_dom;
 mod webdriver_handlers;
 mod window_named_properties;
 mod xpath;

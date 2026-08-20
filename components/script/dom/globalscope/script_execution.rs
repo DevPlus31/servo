@@ -10,7 +10,7 @@ use std::rc::Rc;
 use content_security_policy::sandboxing_directive::SandboxingFlagSet;
 use js::context::JSContext;
 use js::jsapi::{ExceptionStackBehavior, Heap, JSScript, SetScriptPrivate};
-use js::jsval::{PrivateValue, UndefinedValue};
+use js::jsval::{ObjectValue, PrivateValue, UndefinedValue};
 use js::panic::maybe_resume_unwind;
 use js::rust::wrappers2::{
     Compile1, JS_ClearPendingException, JS_ExecuteScript, JS_GetScriptPrivate,
@@ -19,14 +19,18 @@ use js::rust::wrappers2::{
 use js::rust::{
     CompileOptionsWrapper, HandleValue, MutableHandleValue, transform_str_to_source_text,
 };
+use js::{rooted, rooted_vec};
 use script_bindings::cformat;
 use script_bindings::settings_stack::run_a_script;
 use script_bindings::trace::RootedTraceableBox;
+use servo_config::pref;
 use servo_url::ServoUrl;
 
 use crate::DomTypeHolder;
 use crate::dom::bindings::codegen::Bindings::WindowBinding::WindowMethods;
-use crate::dom::bindings::error::{Error, ErrorInfo, ErrorResult, report_pending_exception};
+use crate::dom::bindings::error::{
+    Error, ErrorInfo, ErrorResult, report_pending_exception, throw_dom_exception,
+};
 use crate::dom::bindings::inheritance::Castable;
 use crate::dom::globalscope::GlobalScope;
 use crate::dom::window::Window;
@@ -144,6 +148,154 @@ impl GlobalScope {
             fetch_options,
             muted_errors,
         }
+    }
+
+    /// Runs a `<script type="application/wasm">` module.
+    ///
+    /// Experimental and non-standard. Mirrors the shape of `run_a_classic_script`: bail if
+    /// script cannot run, enter the realm, then compile → build imports → instantiate →
+    /// call the start export. Any failure at any step surfaces as a pending JS exception
+    /// reported through the ordinary `window.onerror` path, exactly as a JS script would.
+    #[cfg(feature = "wasm_dom")]
+    pub(crate) fn run_a_wasm_dom_script(
+        &self,
+        cx: &mut JSContext,
+        script: crate::dom::html::htmlscriptelement::WasmScript,
+    ) {
+        use script_bindings::reflector::DomObject;
+
+        use crate::dom::security::csp::CspReporting;
+        use crate::wasm_dom::bridge::build_import_object;
+        use crate::wasm_dom::instance::WasmDomInstance;
+        use crate::wasm_dom::instantiate::{compile_module, instance_export, instantiate_module};
+
+        if !self.can_run_script() {
+            return;
+        }
+
+        // Belt and braces alongside SpiderMonkey's own CanCompileStrings hook, which fires
+        // inside the Module constructor. Checking here too means a CSP-blocked module fails
+        // before compilation rather than as a thrown CompileError.
+        if !self.get_csp_list().is_wasm_evaluation_allowed(cx, self) {
+            warn!(
+                "wasm-dom: blocked by Content Security Policy: {}",
+                script.url
+            );
+            // Returning here skips the compile whose CanCompileStrings hook would have
+            // thrown visibly, so raise the equivalent ourselves: a silent CSP block is
+            // indistinguishable from a broken module, which cost a debugging session once.
+            let mut realm = enter_auto_realm(cx, self);
+            let cx = &mut realm.current_realm();
+            throw_dom_exception(
+                cx,
+                self,
+                Error::Security(Some(format!(
+                    "wasm-dom: refused to compile {}: blocked by Content Security Policy",
+                    script.url
+                ))),
+            );
+            report_pending_exception(cx);
+            return;
+        }
+
+        let mut realm = enter_auto_realm(cx, self);
+        let cx = &mut realm.current_realm();
+
+        run_a_script::<DomTypeHolder, _, _>(cx, self, |cx| {
+            rooted!(&in(cx) let global_object = self.reflector().get_jsobject().get());
+
+            let Ok(module) = compile_module(cx, global_object.handle(), &script.bytes) else {
+                report_pending_exception(cx);
+                return;
+            };
+            rooted!(&in(cx) let module = module);
+
+            // Register before building imports: the import object embeds the instance index.
+            let instance = Rc::new(WasmDomInstance::new(pref!(dom_wasm_dom_max_handles)));
+            let index = self.register_wasm_dom_instance(instance.clone());
+
+            let Ok(imports) = build_import_object(cx, index) else {
+                throw_dom_exception(
+                    cx,
+                    self,
+                    Error::Type(c"wasm-dom: could not build the import object".to_owned()),
+                );
+                report_pending_exception(cx);
+                return;
+            };
+            rooted!(&in(cx) let imports = imports);
+
+            let Ok(wasm_instance) = instantiate_module(
+                cx,
+                global_object.handle(),
+                module.handle(),
+                imports.handle(),
+            ) else {
+                // A LinkError here usually means the module imported something not exposed.
+                report_pending_exception(cx);
+                return;
+            };
+            rooted!(&in(cx) let wasm_instance = wasm_instance);
+
+            // Memory is required: every string argument travels through it.
+            let Ok(memory) = instance_export(cx, wasm_instance.handle(), c"memory") else {
+                // A thrown TypeError reaches window.onerror and the console; a warn! reaches
+                // nobody. This exact silence pattern has already cost a debugging session
+                // twice on this branch.
+                throw_dom_exception(
+                    cx,
+                    self,
+                    Error::Type(c"wasm-dom: module must export its memory as `memory`".to_owned()),
+                );
+                report_pending_exception(cx);
+                return;
+            };
+            instance.set_memory(memory);
+
+            // Optional: a module that registers no listeners never needs one.
+            if let Ok(dispatcher) =
+                instance_export(cx, wasm_instance.handle(), c"_servo_dom_dispatch")
+            {
+                instance.set_dispatcher(dispatcher);
+            }
+
+            // `_servo_dom_start`, else `_start` for WASI-style toolchains.
+            let start = instance_export(cx, wasm_instance.handle(), c"_servo_dom_start")
+                .or_else(|_| instance_export(cx, wasm_instance.handle(), c"_start"));
+            let Ok(start) = start else {
+                throw_dom_exception(
+                    cx,
+                    self,
+                    Error::Type(
+                        c"wasm-dom: module exports neither _servo_dom_start nor _start".to_owned(),
+                    ),
+                );
+                report_pending_exception(cx);
+                return;
+            };
+
+            rooted!(&in(cx) let start_value = ObjectValue(start));
+            // Separate roots: one value cannot serve as both `this` and the return slot.
+            rooted!(&in(cx) let this_value = UndefinedValue());
+            rooted!(&in(cx) let mut return_value = UndefinedValue());
+            rooted_vec!(let mut no_arguments);
+            let args = js::jsapi::HandleValueArray::from(&no_arguments);
+            // SAFETY: calling a rooted exported function with no arguments.
+            #[expect(unsafe_code)]
+            let ok = unsafe {
+                js::rust::wrappers2::Call(
+                    cx,
+                    this_value.handle().into(),
+                    start_value.handle(),
+                    &args,
+                    return_value.handle_mut(),
+                )
+            };
+            if !ok {
+                // A trap arrives here as a pending RuntimeError.
+                report_pending_exception(cx);
+            }
+        });
     }
 
     /// <https://html.spec.whatwg.org/multipage/#run-a-classic-script>

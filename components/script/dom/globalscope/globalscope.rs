@@ -162,6 +162,8 @@ use crate::timers::{
     TimerEventId, TimerSource,
 };
 use crate::unminify::unminified_path;
+#[cfg(feature = "wasm_dom")]
+use crate::wasm_dom::instance::WasmDomInstance;
 
 #[derive(JSTraceable, MallocSizeOf)]
 pub(crate) struct AutoCloseWorker {
@@ -334,6 +336,20 @@ pub(crate) struct GlobalScope {
     // (that is, they cannot be moved).
     #[allow(clippy::vec_box)]
     consumed_rejections: DomRefCell<Vec<Box<Heap<*mut JSObject>>>>,
+
+    /// Live WebAssembly instances that import the DOM ABI.
+    ///
+    /// Owned by the global rather than by the instantiation call, because a module can
+    /// register an event listener and return: the listener fires later and still needs the
+    /// handle table and memory reference to exist. Indices into this vector are what the
+    /// host-call trampolines stash in their reserved slots, so entries are never removed —
+    /// a torn-down instance is marked, not dropped, which keeps every index stable.
+    // `Rc` has no MallocSizeOf impl and the attribute that handles that cannot be applied
+    // inside a generic argument. Not counted for now: instance state is dominated by the
+    // handle table, which is itself bounded by `dom_wasm_dom_max_handles`.
+    #[ignore_malloc_size_of = "Rc, and bounded by dom_wasm_dom_max_handles"]
+    #[cfg(feature = "wasm_dom")]
+    wasm_dom_instances: DomRefCell<Vec<Rc<WasmDomInstance>>>,
 
     /// Identity Manager for WebGPU resources
     #[ignore_malloc_size_of = "defined in wgpu"]
@@ -812,6 +828,8 @@ impl GlobalScope {
             abort_signal_dependents: Default::default(),
             uncaught_rejections: Default::default(),
             consumed_rejections: Default::default(),
+            #[cfg(feature = "wasm_dom")]
+            wasm_dom_instances: DomRefCell::new(Vec::new()),
             #[cfg(feature = "webgpu")]
             gpu_id_hub,
             #[cfg(feature = "webgpu")]
@@ -3262,6 +3280,53 @@ impl GlobalScope {
             return window.Document().status_code();
         }
         None
+    }
+
+    /// Registers a WebAssembly instance and returns the index its trampolines will carry.
+    #[cfg(feature = "wasm_dom")]
+    pub(crate) fn register_wasm_dom_instance(&self, instance: Rc<WasmDomInstance>) -> usize {
+        let mut instances = self.wasm_dom_instances.borrow_mut();
+        instances.push(instance);
+        instances.len() - 1
+    }
+
+    /// Looks up a registered instance by the index stored in a trampoline's reserved slot.
+    ///
+    /// Returns `None` for an out-of-range index, which can only come from a corrupted slot,
+    /// and for an instance that has been torn down — callers registered before teardown may
+    /// still fire afterwards, and must become no-ops rather than touching dead state.
+    #[cfg(feature = "wasm_dom")]
+    pub(crate) fn wasm_dom_instance(&self, index: usize) -> Option<Rc<WasmDomInstance>> {
+        self.registered_wasm_dom_instance(index)
+            .filter(|instance| !instance.is_torn_down())
+    }
+
+    /// Looks up a registered instance whether or not it has been torn down.
+    ///
+    /// Only for operations that are *about* an instance's lifetime rather than operations
+    /// performed through it. Teardown has to be idempotent — a page tearing down twice, or a
+    /// test cleanup running after an explicit teardown, is not an error — and a handle count
+    /// has to remain readable afterwards, since "teardown released everything" is precisely
+    /// the assertion it exists to support. Both would be impossible if the only lookup
+    /// available refused to see a dead instance.
+    /// How many instances this global has ever registered, live or torn down.
+    #[cfg(feature = "wasm_dom")]
+    pub(crate) fn wasm_dom_instance_count(&self) -> usize {
+        self.wasm_dom_instances.borrow().len()
+    }
+
+    #[cfg(feature = "wasm_dom")]
+    pub(crate) fn registered_wasm_dom_instance(&self, index: usize) -> Option<Rc<WasmDomInstance>> {
+        self.wasm_dom_instances.borrow().get(index).cloned()
+    }
+
+    /// Tears down every WebAssembly instance owned by this global.
+    #[cfg(feature = "wasm_dom")]
+    #[expect(dead_code)]
+    pub(crate) fn tear_down_wasm_dom_instances(&self) {
+        for instance in self.wasm_dom_instances.borrow().iter() {
+            instance.tear_down();
+        }
     }
 
     #[cfg(feature = "webgpu")]

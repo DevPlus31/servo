@@ -338,6 +338,10 @@ pub(crate) mod values;
 pub(crate) mod visualviewport;
 pub(crate) mod wakelock;
 pub(crate) use self::wakelock::*;
+#[cfg(feature = "wasm_dom")]
+pub(crate) mod wasmdom;
+#[cfg(feature = "wasm_dom")]
+pub(crate) use self::wasmdom::*;
 #[cfg(feature = "webgl")]
 pub(crate) mod webgl;
 #[cfg(feature = "webgl")]
